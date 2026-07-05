@@ -170,16 +170,20 @@ namespace Rhinomon
             var old = Atlas;
             Atlas = new SpriteAtlas(CurrentSettings.Pet, EffectiveScale());
             old?.Dispose();
-            RedrawActiveView();
+            // Forced: settings changes originate from the user's own Rhinomon
+            // command, so this immediate-feedback redraw is user-triggered, not
+            // one of the spontaneous redraws P6 forbids during commands.
+            RedrawActiveView(force: true);
         }
 
         /// <summary>
         /// The only place the plug-in ever asks for a redraw. Guarded so that the
-        /// plug-in never generates a redraw while a command is running (PRD P6).
+        /// plug-in never generates a redraw while a command is running (PRD P6),
+        /// unless the redraw is itself the direct result of a user action.
         /// </summary>
-        public static void RedrawActiveView()
+        public static void RedrawActiveView(bool force = false)
         {
-            if (Monitor != null && Monitor.CommandRunning)
+            if (!force && Monitor != null && Monitor.CommandRunning)
                 return;
             RhinoDoc.ActiveDoc?.Views.ActiveView?.Redraw();
         }

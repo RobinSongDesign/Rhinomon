@@ -18,7 +18,10 @@ namespace Rhinomon
     public sealed class RhinomonCommand : Command
     {
         private static readonly string[] PetNames = { "Clawd", "Crab", "Nova" };
-        private static readonly string[] ScaleNames = { "1", "2", "3" };
+        // Rhino's command-line parser only accepts option tokens that start with
+        // a letter; purely numeric list values ("1"/"2"/"3") are dead on click
+        // and on typing. Bare numbers are still accepted via AcceptNumber below.
+        private static readonly string[] ScaleNames = { "x1", "x2", "x3" };
         private static readonly string[] ActivityNames = { "Lively", "Normal", "Chill" };
 
         public override string EnglishName => "Rhinomon";
@@ -51,6 +54,7 @@ namespace Rhinomon
                     PetSystem.Active ? "on" : "off",
                     optionChanged ? "finish" : (PetSystem.Active ? "hide your pet" : "summon your pet")));
                 go.AcceptNothing(true);
+                go.AcceptNumber(true, false); // typing 1/2/3 sets the scale directly
                 int optPet = go.AddOptionList("Pet", PetNames, (int)config.Pet);
                 int optScale = go.AddOptionList("Scale", ScaleNames, config.Scale - 1);
                 int optActivity = go.AddOptionList("Activity", ActivityNames, (int)config.Activity);
@@ -65,6 +69,21 @@ namespace Rhinomon
                     if (!optionChanged)
                         Toggle(plugin, config);
                     return Result.Success;
+                }
+
+                if (res == GetResult.Number)
+                {
+                    int scale = (int)Math.Round(go.Number());
+                    if (scale >= 1 && scale <= 3)
+                    {
+                        ApplyScale(plugin, config, scale);
+                        optionChanged = true;
+                    }
+                    else
+                    {
+                        RhinoApp.WriteLine("Rhinomon: scale must be 1, 2 or 3.");
+                    }
+                    continue;
                 }
 
                 if (res != GetResult.Option)
@@ -88,13 +107,7 @@ namespace Rhinomon
                 }
                 else if (index == optScale)
                 {
-                    int scale = Math.Clamp(option.CurrentListOptionIndex + 1, 1, 3);
-                    if (scale != config.Scale)
-                    {
-                        config.Scale = scale;
-                        plugin.SaveConfig();
-                        PetSystem.ApplyVisualSettings();
-                    }
+                    ApplyScale(plugin, config, option.CurrentListOptionIndex + 1);
                     optionChanged = true;
                 }
                 else if (index == optActivity)
@@ -122,6 +135,16 @@ namespace Rhinomon
                     // Declined: fall through and keep showing the options.
                 }
             }
+        }
+
+        private static void ApplyScale(RhinomonPlugin plugin, PetSettings config, int scale)
+        {
+            scale = Math.Clamp(scale, 1, 3);
+            if (scale == config.Scale)
+                return;
+            config.Scale = scale;
+            plugin.SaveConfig();
+            PetSystem.ApplyVisualSettings();
         }
 
         private static void Toggle(RhinomonPlugin plugin, PetSettings config)
