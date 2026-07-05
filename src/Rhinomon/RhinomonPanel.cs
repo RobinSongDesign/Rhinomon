@@ -70,7 +70,7 @@ namespace Rhinomon
                     }),
                     new TableRow(null, new Label
                     {
-                        Text = "Custom sheets: 256×224 PNG, 8×7 grid of 32 px tiles.",
+                        Text = "Import a 256x224 sheet or a single PNG image.",
                         TextColor = Colors.Gray,
                         Font = SystemFonts.Default(8),
                     }),
@@ -264,7 +264,7 @@ namespace Rhinomon
             var dialog = new OpenFileDialog
             {
                 Title = "Import Rhinomon sprite sheet",
-                Filters = { new FileFilter("PNG sprite sheet (256×224)", ".png") },
+                Filters = { new FileFilter("PNG image or sprite sheet", ".png") },
             };
             if (dialog.ShowDialog(this) != DialogResult.Ok)
                 return;
