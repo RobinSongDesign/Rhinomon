@@ -1,0 +1,40 @@
+---
+# Yak package manifest for Rhinomon.
+# Reference: https://developer.rhino3d.com/guides/yak/the-package-manifest/
+#
+# This is a TEMPLATE. Fields marked "TODO" below must be confirmed/filled in
+# by a human before running `yak build` for a real release — see
+# packaging/README.md for the full build/publish workflow.
+
+name: rhinomon
+version: 0.1.0
+
+# TODO(confirm): who should be listed as author(s) for the public food4Rhino
+# / Yak listing? Placeholder below — replace before packaging.
+authors:
+  - TODO Rhinomon Author
+
+description: >
+  Rhinomon is a pixel-art desktop pet that lives quietly in your Rhino 8
+  viewport. It walks, climbs your geometry, and reacts to your modeling —
+  drawn entirely through DisplayConduit, writing nothing to your document.
+  It is designed to stay out of your way: near-zero draw cost, automatic
+  animation throttling as scenes get heavier, zero extra redraws while a
+  command is running, and a one-click kill switch that fully unloads it.
+
+# TODO(confirm): replace with the real public project/repo or landing page
+# URL before submitting to food4Rhino. Placeholder only.
+url: https://example.com/TODO-rhinomon-project-url
+
+# TODO(confirm): supply a square icon (recommended 128x128 PNG, transparent
+# background) and place it at packaging/rhinomon.png (or update the path
+# below to match). The referenced icon file must exist alongside this
+# manifest when `yak build` runs.
+icon: rhinomon.png
+
+keywords:
+  - pet
+  - desktop pet
+  - viewport
+  - fun
+  - pixel art

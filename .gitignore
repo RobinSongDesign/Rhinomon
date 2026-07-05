@@ -1,0 +1,74 @@
+# ============================================================
+# Rhinomon .gitignore
+# Visual Studio / .NET (src/Rhinomon) + Python (tools/spritegen)
+# + Rhino plugin packaging (packaging/) + OS/editor noise
+# ============================================================
+
+# --- .NET / Visual Studio build output ---
+[Bb]in/
+[Oo]bj/
+out/
+*.dll
+*.pdb
+*.cache
+
+# .rhp is the renamed build output of the plugin (see docs/CONTRACT.md);
+# it lives under bin/ above and is ignored via that rule. This extra rule
+# only guards against a stray copy dropped outside bin/obj.
+/**/bin/**/*.rhp
+
+# Visual Studio / Rider user & workspace files
+.vs/
+.idea/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.userprefs
+*.DotSettings.user
+
+# NuGet
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Build results of MSBuild
+*.dll.config
+*.exe.config
+
+# --- Python (tools/spritegen) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+pip-wheel-metadata/
+
+# --- Yak packaging (packaging/) ---
+# Built packages are release artifacts, not source — rebuild via
+# `yak build` per packaging/README.md rather than committing them.
+packaging/*.yak
+packaging/dist/
+
+# --- Rhino / CAD noise ---
+*.3dmbak
+*.3dm.lock
+*.rui.bak
+
+# --- OS / editor noise ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+*~
