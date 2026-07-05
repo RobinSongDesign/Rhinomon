@@ -205,6 +205,59 @@ namespace Rhinomon
             return true;
         }
 
+        public bool TryFindWorldOverlapEscape(
+            RhinoDoc doc,
+            Point3d petPos,
+            double worldSize,
+            out Point3d escapeTarget,
+            out BoundingBox bbox)
+        {
+            escapeTarget = Point3d.Origin;
+            bbox = BoundingBox.Empty;
+
+            if (doc == null || worldSize <= 0)
+                return false;
+            if (doc.Objects.Count > MaxDocumentObjects)
+                return false;
+
+            double bestExitDistance = double.MaxValue;
+            Point3d bestTarget = Point3d.Origin;
+            BoundingBox bestBox = BoundingBox.Empty;
+
+            int examined = 0;
+            foreach (RhinoObject obj in doc.Objects)
+            {
+                if (++examined > MaxExaminedObjects)
+                    break;
+                if (obj == null || !obj.Visible)
+                    continue;
+
+                GeometryBase geo = obj.Geometry;
+                if (geo == null)
+                    continue;
+
+                BoundingBox candidate = geo.GetBoundingBox(false);
+                if (!candidate.IsValid)
+                    continue;
+                if (!TryComputeOverlapEscape(petPos, worldSize, candidate, out Point3d target, out double exitDistance))
+                    continue;
+
+                if (exitDistance < bestExitDistance)
+                {
+                    bestExitDistance = exitDistance;
+                    bestTarget = target;
+                    bestBox = candidate;
+                }
+            }
+
+            if (!bestBox.IsValid)
+                return false;
+
+            escapeTarget = bestTarget;
+            bbox = bestBox;
+            return true;
+        }
+
         private static double HorizontalDistanceToFootprint(Point3d point, BoundingBox bbox)
         {
             double x = Math.Clamp(point.X, bbox.Min.X, bbox.Max.X);
@@ -212,6 +265,59 @@ namespace Rhinomon
             double dx = point.X - x;
             double dy = point.Y - y;
             return Math.Sqrt(dx * dx + dy * dy);
+        }
+
+        private static bool TryComputeOverlapEscape(
+            Point3d petPos,
+            double worldSize,
+            BoundingBox bbox,
+            out Point3d target,
+            out double exitDistance)
+        {
+            target = Point3d.Origin;
+            exitDistance = 0;
+
+            double epsilon = Math.Max(worldSize * 0.02, 1e-9);
+            double petBottom = petPos.Z + epsilon;
+            double petTop = petPos.Z + worldSize - epsilon;
+            if (bbox.Min.Z >= petTop || bbox.Max.Z <= petBottom)
+                return false;
+            if (bbox.Max.Z <= petPos.Z + worldSize * 0.25)
+                return false;
+
+            if (petPos.X <= bbox.Min.X + epsilon || petPos.X >= bbox.Max.X - epsilon ||
+                petPos.Y <= bbox.Min.Y + epsilon || petPos.Y >= bbox.Max.Y - epsilon)
+            {
+                return false;
+            }
+
+            double toMinX = petPos.X - bbox.Min.X;
+            double toMaxX = bbox.Max.X - petPos.X;
+            double toMinY = petPos.Y - bbox.Min.Y;
+            double toMaxY = bbox.Max.Y - petPos.Y;
+            double offset = worldSize * 0.75 + epsilon;
+            double z = 0;
+
+            exitDistance = toMinX;
+            target = new Point3d(bbox.Min.X - offset, petPos.Y, z);
+
+            if (toMaxX < exitDistance)
+            {
+                exitDistance = toMaxX;
+                target = new Point3d(bbox.Max.X + offset, petPos.Y, z);
+            }
+            if (toMinY < exitDistance)
+            {
+                exitDistance = toMinY;
+                target = new Point3d(petPos.X, bbox.Min.Y - offset, z);
+            }
+            if (toMaxY < exitDistance)
+            {
+                exitDistance = toMaxY;
+                target = new Point3d(petPos.X, bbox.Max.Y + offset, z);
+            }
+
+            return true;
         }
     }
 }

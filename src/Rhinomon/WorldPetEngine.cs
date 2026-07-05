@@ -30,6 +30,7 @@ namespace Rhinomon
         private const long MoodHappyWindowMs = 60_000;
         private const long MoodBoredAfterMs = 600_000;
         private const long OffscreenReturnMs = 60_000;
+        private const long OverlapScanIntervalMs = 750;
 
         public ActivityMonitor Monitor;
         public PerchScanner Scanner;
@@ -60,6 +61,8 @@ namespace Rhinomon
         private bool _perchWalking;
         private long _offscreenSinceMs;
         private bool _returnNearCameraOnNextWalk;
+        private bool _escapingOverlap;
+        private long _nextOverlapScanMs;
 
         private Vector3d _cameraRight = Vector3d.XAxis;
 
@@ -171,6 +174,8 @@ namespace Rhinomon
             if (UpdateEmoteExpiry(now))
                 changed = true;
             UpdateVisibility(vp, now);
+            if (TryStartOverlapEscape(doc, now))
+                changed = true;
 
             long stamp = Monitor != null ? Monitor.LastActivityStamp : 0;
             if (stamp != _idleEpisodeStamp)
@@ -214,6 +219,16 @@ namespace Rhinomon
 
                 case PetState.Walk:
                     _pos.Z = 0;
+                    if (_escapingOverlap)
+                    {
+                        if (MoveToward(_wanderTarget, WalkSpeedBodiesPerSec * 1.35, dtMs, ref changed))
+                        {
+                            _escapingOverlap = false;
+                            _walkPauseUntilMs = now + 1000 + _rng.Next(1500);
+                            SetState(PetState.Idle);
+                        }
+                        break;
+                    }
                     if (idleMs < walkAfter || idleMs >= climbAfter)
                     {
                         SetState(PetState.Idle);
@@ -393,6 +408,8 @@ namespace Rhinomon
             _wanderTarget = _pos;
             _offscreenSinceMs = 0;
             _returnNearCameraOnNextWalk = false;
+            _escapingOverlap = false;
+            _nextOverlapScanMs = 0;
             UpdateCameraRight(vp);
             _needsSpawn = false;
         }
@@ -489,6 +506,8 @@ namespace Rhinomon
         {
             if (doc == null || Scanner == null || _worldSize <= 0)
                 return;
+            if (_escapingOverlap)
+                return;
             if (!Scanner.TryFindWorldPerch(doc, _pos, _worldSize, out Guid objectId, out BoundingBox bbox))
                 return;
 
@@ -499,6 +518,30 @@ namespace Rhinomon
             _perchWalking = false;
             Monitor?.WatchObject(objectId);
             SetState(PetState.WalkToPerch);
+        }
+
+        private bool TryStartOverlapEscape(RhinoDoc doc, long now)
+        {
+            if (doc == null || Scanner == null || _worldSize <= 0)
+                return false;
+            if (_elevated || _state == PetState.Climb || _state == PetState.Fall || _state == PetState.WalkToPerch)
+                return false;
+            if (now < _nextOverlapScanMs)
+                return false;
+
+            _nextOverlapScanMs = now + OverlapScanIntervalMs;
+            if (!Scanner.TryFindWorldOverlapEscape(doc, _pos, _worldSize, out Point3d target, out _))
+                return false;
+
+            _pos.Z = 0;
+            _wanderTarget = target;
+            _escapingOverlap = true;
+            _returnNearCameraOnNextWalk = false;
+            if (_emote == EmoteKind.Zzz)
+                ClearEmote();
+            SetEmote(EmoteKind.Exclaim, now + 1200);
+            SetState(PetState.Walk);
+            return true;
         }
 
         private void ConfigurePerchPath(BoundingBox bbox)
@@ -596,6 +639,7 @@ namespace Rhinomon
         private void StartFall()
         {
             AbandonPerchTracking();
+            _escapingOverlap = false;
             if (_state == PetState.Fall)
                 return;
             SetState(PetState.Fall);
@@ -674,7 +718,7 @@ namespace Rhinomon
 
         private void StartOneShot(PetState oneShot)
         {
-            if (_state == PetState.Fall || _state == PetState.Climb || _state == PetState.WalkToPerch)
+            if (_escapingOverlap || _state == PetState.Fall || _state == PetState.Climb || _state == PetState.WalkToPerch)
                 return;
             SetState(oneShot);
         }
