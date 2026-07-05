@@ -26,6 +26,7 @@ namespace Rhinomon
 
         private long _frameStartTimestamp;
         private int _failBBox;
+        private int _failWorld;
         private int _failDraw;
 
         protected override void CalculateBoundingBox(CalculateBoundingBoxEventArgs e)
@@ -41,6 +42,32 @@ namespace Rhinomon
             catch (Exception ex)
             {
                 Guard.Fail(ref _failBBox, "PetConduit.CalculateBoundingBox", ex);
+            }
+        }
+
+        protected override void PostDrawObjects(DrawEventArgs e)
+        {
+            try
+            {
+                var vp = e.Viewport;
+                if (vp == null || !PetSystem.IsActiveViewport(vp))
+                    return;
+
+                var display = e.Display;
+                var engine = Engine;
+                if (display == null || engine == null)
+                    return;
+
+                if (engine.TryGetWorldDrawInfo(out DisplayBitmap sprite, out var position, out float worldSize) &&
+                    sprite != null && worldSize > 0)
+                {
+                    display.DrawSprite(sprite, position, worldSize, true);
+                }
+                _failWorld = 0;
+            }
+            catch (Exception ex)
+            {
+                Guard.Fail(ref _failWorld, "PetConduit.PostDrawObjects", ex);
             }
         }
 
@@ -62,7 +89,8 @@ namespace Rhinomon
                 if (engine.TryGetScreenDrawInfo(vp, out DisplayBitmap sprite, out Rectangle petRect,
                                                 out DisplayBitmap emote, out Rectangle emoteRect))
                 {
-                    display.DrawBitmap(sprite, petRect.X, petRect.Y);
+                    if (sprite != null)
+                        display.DrawBitmap(sprite, petRect.X, petRect.Y);
                     if (emote != null)
                         display.DrawBitmap(emote, emoteRect.X, emoteRect.Y);
                     LastPetRect = petRect;

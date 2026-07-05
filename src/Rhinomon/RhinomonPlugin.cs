@@ -130,15 +130,27 @@ namespace Rhinomon
             CurrentSettings = settings;
             Atlas = BuildAtlas();
 
-            var engine = new PetEngine();
-            Engine = engine;
             Monitor = new ActivityMonitor();
             Conduit = new PetConduit();
             Interceptor = new ClickInterceptor();
             Governor = new PerfGovernor();
 
-            engine.Monitor = Monitor;
-            engine.Scanner = new PerchScanner();
+            var scanner = new PerchScanner();
+            if (settings.Mode == PetDisplayMode.World)
+            {
+                var worldEngine = new WorldPetEngine();
+                worldEngine.Monitor = Monitor;
+                worldEngine.Scanner = scanner;
+                Engine = worldEngine;
+            }
+            else
+            {
+                var screenEngine = new PetEngine();
+                screenEngine.Monitor = Monitor;
+                screenEngine.Scanner = scanner;
+                Engine = screenEngine;
+            }
+
             Monitor.Engine = Engine;
             Monitor.Governor = Governor;
             Conduit.Engine = Engine;
@@ -271,6 +283,8 @@ namespace Rhinomon
 
         private static int EffectiveScale()
         {
+            if (CurrentSettings != null && CurrentSettings.Mode == PetDisplayMode.World)
+                return 4;
             return Math.Clamp(CurrentSettings.Scale * _dpiMultiplier, 1, 6);
         }
 
