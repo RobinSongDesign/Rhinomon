@@ -58,6 +58,7 @@ namespace Rhinomon
                 int optPet = go.AddOptionList("Pet", PetNames, (int)config.Pet);
                 int optScale = go.AddOptionList("Scale", ScaleNames, config.Scale - 1);
                 int optActivity = go.AddOptionList("Activity", ActivityNames, (int)config.Activity);
+                int optPanel = go.AddOption("Panel");
                 int optHide = go.AddOption("Hide");
 
                 GetResult res = go.Get();
@@ -116,6 +117,11 @@ namespace Rhinomon
                         option.CurrentListOptionIndex, 0, ActivityNames.Length - 1);
                     plugin.SaveConfig();
                     optionChanged = true;
+                }
+                else if (index == optPanel)
+                {
+                    Rhino.UI.Panels.OpenPanel(typeof(RhinomonPanel).GUID);
+                    return Result.Success;
                 }
                 else if (index == optHide)
                 {

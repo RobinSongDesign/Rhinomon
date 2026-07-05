@@ -29,6 +29,8 @@ namespace Rhinomon
     internal sealed class PetSettings
     {
         public PetKind Pet = PetKind.Clawd;
+        // Name of a PetLibrary sheet; empty means the built-in Pet is active.
+        public string CustomPet = "";
         public int Scale = 2;
         public ActivityLevel Activity = ActivityLevel.Lively;
         public bool Enabled;
@@ -37,6 +39,7 @@ namespace Rhinomon
         public void Load(PersistentSettings s)
         {
             Pet = s.GetEnumValue("Pet", PetKind.Clawd);
+            CustomPet = s.GetString("CustomPet", "");
             Scale = Math.Clamp(s.GetInteger("Scale", 2), 1, 3);
             Activity = s.GetEnumValue("Activity", ActivityLevel.Lively);
             Enabled = s.GetBool("Enabled", false);
@@ -46,6 +49,7 @@ namespace Rhinomon
         public void Save(PersistentSettings s)
         {
             s.SetEnumValue("Pet", Pet);
+            s.SetString("CustomPet", CustomPet ?? "");
             s.SetInteger("Scale", Scale);
             s.SetEnumValue("Activity", Activity);
             s.SetBool("Enabled", Enabled);
@@ -81,6 +85,17 @@ namespace Rhinomon
     /// </summary>
     internal static class PetSystem
     {
+        /// <summary>
+        /// Raised after any settings change is persisted, from the command or the
+        /// panel, so the other surface can refresh its mirrored controls.
+        /// </summary>
+        public static event Action ConfigChanged;
+
+        public static void RaiseConfigChanged()
+        {
+            ConfigChanged?.Invoke();
+        }
+
         public static bool Active { get; private set; }
         public static PetSettings CurrentSettings { get; private set; }
         public static SpriteAtlas Atlas { get; private set; }
@@ -101,7 +116,7 @@ namespace Rhinomon
                 return;
 
             CurrentSettings = settings;
-            Atlas = new SpriteAtlas(settings.Pet, EffectiveScale());
+            Atlas = BuildAtlas();
 
             Engine = new PetEngine();
             Monitor = new ActivityMonitor();
@@ -168,7 +183,7 @@ namespace Rhinomon
             if (!Active)
                 return;
             var old = Atlas;
-            Atlas = new SpriteAtlas(CurrentSettings.Pet, EffectiveScale());
+            Atlas = BuildAtlas();
             old?.Dispose();
             // Forced: settings changes originate from the user's own Rhinomon
             // command, so this immediate-feedback redraw is user-triggered, not
@@ -245,6 +260,19 @@ namespace Rhinomon
         {
             return Math.Clamp(CurrentSettings.Scale * _dpiMultiplier, 1, 6);
         }
+
+        private static SpriteAtlas BuildAtlas()
+        {
+            var settings = CurrentSettings;
+            if (!string.IsNullOrEmpty(settings.CustomPet))
+            {
+                string path = PetLibrary.PathFor(settings.CustomPet);
+                if (System.IO.File.Exists(path))
+                    return new SpriteAtlas(path, EffectiveScale());
+                settings.CustomPet = ""; // sheet vanished from disk: fall back to built-in
+            }
+            return new SpriteAtlas(settings.Pet, EffectiveScale());
+        }
     }
 
     public sealed class RhinomonPlugin : PlugIn
@@ -265,9 +293,34 @@ namespace Rhinomon
         protected override LoadReturnCode OnLoad(ref string errorMessage)
         {
             Config.Load(Settings);
+            Rhino.UI.Panels.RegisterPanel(this, typeof(RhinomonPanel), "Rhinomon", CreatePanelIcon());
             if (Config.Enabled && !Config.Hidden)
                 PetSystem.Enable(Config);
             return LoadReturnCode.Success;
+        }
+
+        /// <summary>
+        /// Panel tab icon: the first idle frame of Clawd, or an orange square if
+        /// the sprite assets are missing. The HICON is never destroyed; one icon
+        /// for the application lifetime is intentional.
+        /// </summary>
+        private static System.Drawing.Icon CreatePanelIcon()
+        {
+            try
+            {
+                using System.Drawing.Bitmap tile = SpriteAtlas.LoadBuiltInTile(PetKind.Clawd);
+                if (tile != null)
+                    return System.Drawing.Icon.FromHandle(tile.GetHicon());
+            }
+            catch (Exception)
+            {
+                // Fall through to the plain fallback below.
+            }
+
+            using var fallback = new System.Drawing.Bitmap(16, 16);
+            using (var g = System.Drawing.Graphics.FromImage(fallback))
+                g.Clear(System.Drawing.Color.FromArgb(0xD9, 0x77, 0x57));
+            return System.Drawing.Icon.FromHandle(fallback.GetHicon());
         }
 
         protected override void OnShutdown()
@@ -281,6 +334,7 @@ namespace Rhinomon
         {
             Config.Save(Settings);
             SaveSettings();
+            PetSystem.RaiseConfigChanged();
         }
     }
 }

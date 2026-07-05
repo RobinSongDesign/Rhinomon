@@ -81,7 +81,15 @@ namespace Rhinomon
         public SpriteAtlas(PetKind pet, int scale)
         {
             Scale = Math.Clamp(scale, 1, 6);
-            LoadPetSheet(pet);
+            SliceSheet(LoadEmbeddedBitmap(SheetNames[Math.Clamp((int)pet, 0, SheetNames.Length - 1)]));
+            LoadEmoteSheet();
+        }
+
+        /// <summary>Atlas for a user-imported sheet (PRD F10). Emotes stay built in.</summary>
+        public SpriteAtlas(string customSheetPath, int scale)
+        {
+            Scale = Math.Clamp(scale, 1, 6);
+            SliceSheet(LoadFileBitmap(customSheetPath));
             LoadEmoteSheet();
         }
 
@@ -102,10 +110,8 @@ namespace Rhinomon
             return _emotes[emote];
         }
 
-        private void LoadPetSheet(PetKind pet)
+        private void SliceSheet(Bitmap sheet)
         {
-            string fileName = SheetNames[Math.Clamp((int)pet, 0, SheetNames.Length - 1)];
-            Bitmap sheet = LoadEmbeddedBitmap(fileName);
             if (sheet == null)
             {
                 UsingPlaceholder = true;
@@ -176,6 +182,38 @@ namespace Rhinomon
                     GraphicsUnit.Pixel);
             }
             return result;
+        }
+
+        /// <summary>
+        /// First idle frame of a built-in pet at native 32 px, for UI icons.
+        /// Caller owns the bitmap. Null when the asset is missing.
+        /// </summary>
+        internal static Bitmap LoadBuiltInTile(PetKind pet)
+        {
+            using Bitmap sheet = LoadEmbeddedBitmap(SheetNames[Math.Clamp((int)pet, 0, SheetNames.Length - 1)]);
+            if (sheet == null || sheet.Width < TileSize || sheet.Height < TileSize)
+                return null;
+            return sheet.Clone(new Rectangle(0, 0, TileSize, TileSize), PixelFormat.Format32bppArgb);
+        }
+
+        /// <summary>File-backed sheet for custom pets; null on any failure.</summary>
+        private static Bitmap LoadFileBitmap(string path)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                    return null;
+                // Copy so the file handle is not kept open for the atlas lifetime.
+                using var fromFile = new Bitmap(path);
+                if (fromFile.Width != SheetColumns * TileSize ||
+                    fromFile.Height != AnimationCount * TileSize)
+                    return null; // malformed sheet: placeholder is safer than misaligned frames
+                return new Bitmap(fromFile);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         private static Bitmap LoadEmbeddedBitmap(string fileName)
