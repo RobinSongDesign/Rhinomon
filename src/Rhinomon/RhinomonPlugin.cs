@@ -99,7 +99,7 @@ namespace Rhinomon
         public static bool Active { get; private set; }
         public static PetSettings CurrentSettings { get; private set; }
         public static SpriteAtlas Atlas { get; private set; }
-        public static PetEngine Engine { get; private set; }
+        public static IPetEngine Engine { get; private set; }
         public static ActivityMonitor Monitor { get; private set; }
         public static PetConduit Conduit { get; private set; }
         public static ClickInterceptor Interceptor { get; private set; }
@@ -118,14 +118,15 @@ namespace Rhinomon
             CurrentSettings = settings;
             Atlas = BuildAtlas();
 
-            Engine = new PetEngine();
+            var engine = new PetEngine();
+            Engine = engine;
             Monitor = new ActivityMonitor();
             Conduit = new PetConduit();
             Interceptor = new ClickInterceptor();
             Governor = new PerfGovernor();
 
-            Engine.Monitor = Monitor;
-            Engine.Scanner = new PerchScanner();
+            engine.Monitor = Monitor;
+            engine.Scanner = new PerchScanner();
             Monitor.Engine = Engine;
             Monitor.Governor = Governor;
             Conduit.Engine = Engine;

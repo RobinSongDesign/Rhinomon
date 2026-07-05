@@ -16,7 +16,7 @@ namespace Rhinomon
     /// </summary>
     internal sealed class PetConduit : DisplayConduit
     {
-        public PetEngine Engine;
+        public IPetEngine Engine;
         public PerfGovernor Governor;
 
         // Last drawn pet rectangle, used by ClickInterceptor for hit testing
@@ -59,8 +59,8 @@ namespace Rhinomon
 
                 bool dynamic = display.IsDynamicDisplay;
 
-                if (engine.TryGetDrawInfo(vp, out DisplayBitmap sprite, out Rectangle petRect,
-                                          out DisplayBitmap emote, out Rectangle emoteRect))
+                if (engine.TryGetScreenDrawInfo(vp, out DisplayBitmap sprite, out Rectangle petRect,
+                                                out DisplayBitmap emote, out Rectangle emoteRect))
                 {
                     display.DrawBitmap(sprite, petRect.X, petRect.Y);
                     if (emote != null)

@@ -41,7 +41,7 @@ namespace Rhinomon
     /// one-shot reactions and animation frame scheduling. Runs on the UI thread,
     /// driven by PerfGovernor ticks; PetConduit only reads the current frame.
     /// </summary>
-    internal sealed class PetEngine
+    internal sealed class PetEngine : IPetEngine
     {
         // Idle ladder thresholds in ms, indexed by ActivityLevel:
         // { start wandering, try to climb, fall asleep } (PRD F5).
@@ -353,7 +353,7 @@ namespace Rhinomon
         /// allocation. When perched, re-projects the world anchor so the pet
         /// tracks the view even on piggyback redraws while the timer is paused.
         /// </summary>
-        public bool TryGetDrawInfo(
+        public bool TryGetScreenDrawInfo(
             RhinoViewport vp,
             out DisplayBitmap sprite,
             out Rectangle petRect,
@@ -405,6 +405,14 @@ namespace Rhinomon
                 }
             }
             return true;
+        }
+
+        public bool TryGetWorldDrawInfo(out DisplayBitmap sprite, out Point3d position, out float worldSize)
+        {
+            sprite = null;
+            position = Point3d.Origin;
+            worldSize = 0;
+            return false;
         }
 
         // ---- internals -----------------------------------------------------

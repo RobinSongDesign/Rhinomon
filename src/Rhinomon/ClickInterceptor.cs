@@ -15,7 +15,7 @@ namespace Rhinomon
     {
         public ActivityMonitor Monitor;
         public PetConduit Conduit;
-        public PetEngine Engine;
+        public IPetEngine Engine;
         public PerfGovernor Governor;
 
         private int _failDown;

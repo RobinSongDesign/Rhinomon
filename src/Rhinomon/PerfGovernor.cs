@@ -22,7 +22,7 @@ namespace Rhinomon
         private const double RecoverLevel2BelowMs = 48.0; // level 2 -> 1
         private const int SampleWindow = 8;
 
-        public PetEngine Engine;
+        public IPetEngine Engine;
         public ActivityMonitor Monitor;
 
         private System.Windows.Forms.Timer _timer;

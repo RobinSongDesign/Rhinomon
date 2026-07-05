@@ -18,7 +18,7 @@ namespace Rhinomon
         private const long ReactionCooldownMs = 8_000;
         private const int MassDeleteThreshold = 10;
 
-        public PetEngine Engine;
+        public IPetEngine Engine;
         public PerfGovernor Governor;
 
         private bool _started;
