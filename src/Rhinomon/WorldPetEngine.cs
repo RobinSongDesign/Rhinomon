@@ -29,6 +29,7 @@ namespace Rhinomon
         private const int PettedRepeatGuardMs = 800;
         private const long MoodHappyWindowMs = 60_000;
         private const long MoodBoredAfterMs = 600_000;
+        private const long OffscreenReturnMs = 60_000;
 
         public ActivityMonitor Monitor;
         public PerchScanner Scanner;
@@ -57,6 +58,8 @@ namespace Rhinomon
         private Point3d _perchTarget;
         private long _perchPauseUntilMs;
         private bool _perchWalking;
+        private long _offscreenSinceMs;
+        private bool _returnNearCameraOnNextWalk;
 
         private Vector3d _cameraRight = Vector3d.XAxis;
 
@@ -167,6 +170,7 @@ namespace Rhinomon
             UpdateMood(now);
             if (UpdateEmoteExpiry(now))
                 changed = true;
+            UpdateVisibility(vp, now);
 
             long stamp = Monitor != null ? Monitor.LastActivityStamp : 0;
             if (stamp != _idleEpisodeStamp)
@@ -203,6 +207,7 @@ namespace Rhinomon
                     else if (!_elevated && idleMs >= walkAfter && now >= _walkPauseUntilMs)
                     {
                         _wanderTarget = PickWanderTarget(vp);
+                        _returnNearCameraOnNextWalk = false;
                         SetState(PetState.Walk);
                     }
                     break;
@@ -386,6 +391,8 @@ namespace Rhinomon
             var target = vp.CameraTarget;
             _pos = new Point3d(target.X, target.Y, 0);
             _wanderTarget = _pos;
+            _offscreenSinceMs = 0;
+            _returnNearCameraOnNextWalk = false;
             UpdateCameraRight(vp);
             _needsSpawn = false;
         }
@@ -437,13 +444,45 @@ namespace Rhinomon
         {
             var center = vp != null ? vp.CameraTarget : _pos;
             center.Z = 0;
-            double radius = Math.Max(_worldSize, _worldSize * 20.0);
+            double radius = _returnNearCameraOnNextWalk ? _worldSize * 6.0 : _worldSize * 20.0;
+            radius = Math.Max(_worldSize, radius);
             double angle = _rng.NextDouble() * Math.PI * 2.0;
             double distance = Math.Sqrt(_rng.NextDouble()) * radius;
             return new Point3d(
                 center.X + Math.Cos(angle) * distance,
                 center.Y + Math.Sin(angle) * distance,
                 0);
+        }
+
+        private void UpdateVisibility(RhinoViewport vp, long now)
+        {
+            if (!TryProjectPet(vp, out Rectangle rect))
+            {
+                MarkOffscreen(now);
+                return;
+            }
+
+            Rectangle bounds = vp.Bounds;
+            bool visible = rect.Right >= 0 && rect.Left <= bounds.Width &&
+                           rect.Bottom >= 0 && rect.Top <= bounds.Height;
+            if (visible)
+            {
+                _offscreenSinceMs = 0;
+                return;
+            }
+
+            MarkOffscreen(now);
+        }
+
+        private void MarkOffscreen(long now)
+        {
+            if (_offscreenSinceMs == 0)
+            {
+                _offscreenSinceMs = now;
+                return;
+            }
+            if (now - _offscreenSinceMs > OffscreenReturnMs)
+                _returnNearCameraOnNextWalk = true;
         }
 
         private void TryStartPerch(RhinoDoc doc)

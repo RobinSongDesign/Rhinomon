@@ -74,9 +74,17 @@ Run the **`Rhinomon`** command.
 | `Pet` | `Clawd` / `Crab` / `Nova` | Choose which pet is active |
 | `Scale` | `1` / `2` / `3` | Sprite size (logical 32×32 px, ×1/×2/×3 nearest-neighbor scaling; default ×2) |
 | `Activity` | `Lively` / `Normal` / `Chill` | How quickly the pet gets bored and moves through its idle timeline (default: `Lively`) |
+| `Mode` | `Screen` / `World` | `Screen` keeps the classic 2D viewport pet; `World` makes it live at a model-space position |
+| `WorldSize` | number, `0` = automatic | Pet height in model units for `World` mode; ignored in `Screen` mode |
 | `Hide` | — | Kill switch: permanently disables the pet (asks for confirmation). Run `Rhinomon` again anytime to bring it back |
 
 All settings persist across Rhino restarts via `PlugIn.Settings`.
+
+In `World` mode, Rhinomon is drawn as a 2.5D world-space sprite: it keeps an
+absolute model-unit size, scales with camera distance, can be hidden behind
+geometry, and climbs cached bounding-box faces instead of screen edges.
+Use `WorldSize=0` for automatic sizing from the visible model bounds, or set a
+specific model-unit height when you want predictable scale across files.
 
 <!-- SCREENSHOT: the Rhinomon command line showing the Pet / Scale / Activity
      / Hide options -->
