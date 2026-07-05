@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using Rhino.Display;
+using Rhino.Geometry;
 
 namespace Rhinomon
 {
@@ -33,10 +34,24 @@ namespace Rhinomon
         {
             try
             {
-                // Never touches e.BoundingBox: the pet lives in screen space and
-                // must not influence zoom-extents or clipping.
                 if (PetSystem.IsActiveViewport(e.Viewport))
+                {
                     _frameStartTimestamp = Stopwatch.GetTimestamp();
+
+                    // Screen mode lives outside world clipping. World mode must
+                    // contribute a tiny bbox or Rhino may cull the sprite at
+                    // certain view angles before PostDrawObjects gets to draw it.
+                    var engine = Engine;
+                    if (engine != null &&
+                        engine.TryGetWorldDrawInfo(out DisplayBitmap sprite, out Point3d position, out float worldSize) &&
+                        sprite != null && worldSize > 0)
+                    {
+                        double radius = Math.Max(worldSize, 0.001f);
+                        e.IncludeBoundingBox(new BoundingBox(
+                            new Point3d(position.X - radius, position.Y - radius, position.Z - radius),
+                            new Point3d(position.X + radius, position.Y + radius, position.Z + radius)));
+                    }
+                }
                 _failBBox = 0;
             }
             catch (Exception ex)
