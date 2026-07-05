@@ -23,6 +23,8 @@ namespace Rhinomon
 
         private const int MaxWorldSizeObjects = 4096;
         private const double WalkSpeedBodiesPerSec = 1.6;
+        private const double ClimbSpeedBodiesPerSec = 1.1;
+        private const double FallSpeedBodiesPerSec = 14.0;
         private const int ReactionEmoteMs = 2500;
         private const int PettedRepeatGuardMs = 800;
         private const long MoodHappyWindowMs = 60_000;
@@ -46,6 +48,16 @@ namespace Rhinomon
         private long _walkPauseUntilMs;
         private long _idleEpisodeStamp;
 
+        private bool _hasPerch;
+        private bool _elevated;
+        private bool _perchTriedThisEpisode;
+        private BoundingBox _perchBox;
+        private Point3d _perchApproach;
+        private Point3d _perchEntry;
+        private Point3d _perchTarget;
+        private long _perchPauseUntilMs;
+        private bool _perchWalking;
+
         private Vector3d _cameraRight = Vector3d.XAxis;
 
         private EmoteKind _emote = EmoteKind.None;
@@ -62,7 +74,7 @@ namespace Rhinomon
         public void ResetToHome()
         {
             _needsSpawn = true;
-            Monitor?.ClearWatch();
+            AbandonPerchTracking();
             SetState(PetState.Idle);
             _emote = EmoteKind.None;
             SpawnFromActiveView();
@@ -70,8 +82,24 @@ namespace Rhinomon
 
         public void OnStrongInterrupt()
         {
-            if (_state == PetState.Sleep)
+            if (_state == PetState.Climb)
+            {
+                StartFall();
+                return;
+            }
+
+            if (_state == PetState.WalkToPerch)
+            {
+                AbandonPerchTracking();
                 SetState(PetState.Idle);
+            }
+            else if (_state == PetState.Sleep || _state == PetState.Perched)
+            {
+                _perchWalking = false;
+                _perchPauseUntilMs = System.Environment.TickCount64 + 1200;
+                SetState(_elevated ? PetState.Perched : PetState.Idle);
+            }
+
             if (_emote == EmoteKind.Zzz)
                 ClearEmote();
         }
@@ -142,21 +170,37 @@ namespace Rhinomon
 
             long stamp = Monitor != null ? Monitor.LastActivityStamp : 0;
             if (stamp != _idleEpisodeStamp)
+            {
                 _idleEpisodeStamp = stamp;
+                _perchTriedThisEpisode = false;
+            }
+
+            if (_hasPerch && Monitor != null && Monitor.ConsumeAnchorDeleted())
+            {
+                StartFall();
+                changed = true;
+            }
 
             long idleMs = Monitor != null ? Monitor.IdleMilliseconds : 0;
             long walkAfter = Threshold(0);
+            long climbAfter = Threshold(1);
             long sleepAfter = Threshold(2);
 
             switch (_state)
             {
                 case PetState.Idle:
-                    _pos.Z = 0;
+                    if (!_elevated)
+                        _pos.Z = 0;
                     if (idleMs >= sleepAfter)
                     {
                         SetState(PetState.Sleep);
                     }
-                    else if (idleMs >= walkAfter && now >= _walkPauseUntilMs)
+                    else if (!_elevated && idleMs >= climbAfter && !_perchTriedThisEpisode)
+                    {
+                        _perchTriedThisEpisode = true;
+                        TryStartPerch(doc);
+                    }
+                    else if (!_elevated && idleMs >= walkAfter && now >= _walkPauseUntilMs)
                     {
                         _wanderTarget = PickWanderTarget(vp);
                         SetState(PetState.Walk);
@@ -165,7 +209,7 @@ namespace Rhinomon
 
                 case PetState.Walk:
                     _pos.Z = 0;
-                    if (idleMs < walkAfter)
+                    if (idleMs < walkAfter || idleMs >= climbAfter)
                     {
                         SetState(PetState.Idle);
                         break;
@@ -177,12 +221,84 @@ namespace Rhinomon
                     }
                     break;
 
+                case PetState.WalkToPerch:
+                    _pos.Z = 0;
+                    if (!_hasPerch)
+                    {
+                        SetState(PetState.Idle);
+                        break;
+                    }
+                    if (MoveToward(_perchApproach, WalkSpeedBodiesPerSec, dtMs, ref changed))
+                    {
+                        _pos = _perchApproach;
+                        SetState(PetState.Climb);
+                    }
+                    break;
+
+                case PetState.Climb:
+                    if (!_hasPerch)
+                    {
+                        StartFall();
+                        changed = true;
+                        break;
+                    }
+                    double climbStep = ClimbSpeedBodiesPerSec * _worldSize * dtMs / 1000.0;
+                    double topZ = _perchBox.Max.Z;
+                    if (_pos.Z + climbStep >= topZ)
+                    {
+                        _pos = _perchEntry;
+                        _elevated = true;
+                        _perchWalking = false;
+                        _perchPauseUntilMs = now + 1200 + _rng.Next(2600);
+                        SetState(PetState.Perched);
+                    }
+                    else
+                    {
+                        _pos = new Point3d(_perchApproach.X, _perchApproach.Y, _pos.Z + climbStep);
+                    }
+                    changed = true;
+                    break;
+
+                case PetState.Perched:
+                    if (!_hasPerch)
+                    {
+                        StartFall();
+                        changed = true;
+                        break;
+                    }
+                    _pos.Z = _perchBox.Max.Z;
+                    if (idleMs >= sleepAfter)
+                    {
+                        _perchWalking = false;
+                        SetState(PetState.Sleep);
+                    }
+                    else
+                    {
+                        UpdatePerchedWalk(now, dtMs, ref changed);
+                    }
+                    break;
+
                 case PetState.Sleep:
                     if (idleMs < 1000)
                     {
                         ClearEmote();
+                        SetState(_elevated ? PetState.Perched : PetState.Idle);
+                    }
+                    break;
+
+                case PetState.Fall:
+                    double fallStep = FallSpeedBodiesPerSec * _worldSize * dtMs / 1000.0;
+                    if (_pos.Z - fallStep <= 0)
+                    {
+                        _pos.Z = 0;
+                        _elevated = false;
                         SetState(PetState.Idle);
                     }
+                    else
+                    {
+                        _pos.Z -= fallStep;
+                    }
+                    changed = true;
                     break;
 
                 case PetState.Petted:
@@ -330,6 +446,131 @@ namespace Rhinomon
                 0);
         }
 
+        private void TryStartPerch(RhinoDoc doc)
+        {
+            if (doc == null || Scanner == null || _worldSize <= 0)
+                return;
+            if (!Scanner.TryFindWorldPerch(doc, _pos, _worldSize, out Guid objectId, out BoundingBox bbox))
+                return;
+
+            _perchBox = bbox;
+            ConfigurePerchPath(bbox);
+            _hasPerch = true;
+            _elevated = false;
+            _perchWalking = false;
+            Monitor?.WatchObject(objectId);
+            SetState(PetState.WalkToPerch);
+        }
+
+        private void ConfigurePerchPath(BoundingBox bbox)
+        {
+            FindNearestPerchSide(bbox, out Point3d sidePoint, out Vector3d normal);
+
+            double half = _worldSize * 0.5;
+            _perchApproach = sidePoint + normal * half;
+            _perchApproach.Z = 0;
+
+            Point3d entry = sidePoint - normal * half;
+            _perchEntry = ClampToTop(entry, bbox);
+            _perchTarget = _perchEntry;
+        }
+
+        private void FindNearestPerchSide(BoundingBox bbox, out Point3d sidePoint, out Vector3d normal)
+        {
+            Point3d bestPoint = new Point3d(bbox.Min.X, Math.Clamp(_pos.Y, bbox.Min.Y, bbox.Max.Y), 0);
+            Vector3d bestNormal = new Vector3d(-1, 0, 0);
+            double best = HorizontalDistance(_pos, bestPoint);
+
+            Consider(new Point3d(bbox.Max.X, Math.Clamp(_pos.Y, bbox.Min.Y, bbox.Max.Y), 0), new Vector3d(1, 0, 0));
+            Consider(new Point3d(Math.Clamp(_pos.X, bbox.Min.X, bbox.Max.X), bbox.Min.Y, 0), new Vector3d(0, -1, 0));
+            Consider(new Point3d(Math.Clamp(_pos.X, bbox.Min.X, bbox.Max.X), bbox.Max.Y, 0), new Vector3d(0, 1, 0));
+
+            void Consider(Point3d candidate, Vector3d candidateNormal)
+            {
+                double dist = HorizontalDistance(_pos, candidate);
+                if (dist >= best)
+                    return;
+                best = dist;
+                bestPoint = candidate;
+                bestNormal = candidateNormal;
+            }
+
+            sidePoint = bestPoint;
+            normal = bestNormal;
+        }
+
+        private void UpdatePerchedWalk(long now, double dtMs, ref bool changed)
+        {
+            if (!_perchWalking)
+            {
+                if (now >= _perchPauseUntilMs)
+                {
+                    _perchTarget = PickPerchTarget();
+                    _perchWalking = true;
+                }
+                return;
+            }
+
+            if (MoveToward(_perchTarget, WalkSpeedBodiesPerSec * 0.75, dtMs, ref changed))
+            {
+                _perchWalking = false;
+                _perchPauseUntilMs = now + 1500 + _rng.Next(4500);
+            }
+        }
+
+        private Point3d PickPerchTarget()
+        {
+            GetInsetRange(_perchBox.Min.X, _perchBox.Max.X, out double minX, out double maxX);
+            GetInsetRange(_perchBox.Min.Y, _perchBox.Max.Y, out double minY, out double maxY);
+            return new Point3d(
+                minX + _rng.NextDouble() * (maxX - minX),
+                minY + _rng.NextDouble() * (maxY - minY),
+                _perchBox.Max.Z);
+        }
+
+        private Point3d ClampToTop(Point3d point, BoundingBox bbox)
+        {
+            GetInsetRange(bbox.Min.X, bbox.Max.X, out double minX, out double maxX);
+            GetInsetRange(bbox.Min.Y, bbox.Max.Y, out double minY, out double maxY);
+            return new Point3d(
+                Math.Clamp(point.X, minX, maxX),
+                Math.Clamp(point.Y, minY, maxY),
+                bbox.Max.Z);
+        }
+
+        private void GetInsetRange(double min, double max, out double insetMin, out double insetMax)
+        {
+            double inset = Math.Min(_worldSize * 0.5, Math.Max(0, (max - min) * 0.5));
+            insetMin = min + inset;
+            insetMax = max - inset;
+            if (insetMin > insetMax)
+                insetMin = insetMax = 0.5 * (min + max);
+        }
+
+        private static double HorizontalDistance(Point3d a, Point3d b)
+        {
+            double dx = a.X - b.X;
+            double dy = a.Y - b.Y;
+            return Math.Sqrt(dx * dx + dy * dy);
+        }
+
+        private void StartFall()
+        {
+            AbandonPerchTracking();
+            if (_state == PetState.Fall)
+                return;
+            SetState(PetState.Fall);
+            SetEmote(EmoteKind.Exclaim, System.Environment.TickCount64 + 1200);
+        }
+
+        private void AbandonPerchTracking()
+        {
+            _hasPerch = false;
+            _elevated = false;
+            _perchWalking = false;
+            Monitor?.ClearWatch();
+        }
+
         private bool MoveToward(Point3d target, double bodiesPerSec, double dtMs, ref bool changed)
         {
             target.Z = _pos.Z;
@@ -394,12 +635,14 @@ namespace Rhinomon
 
         private void StartOneShot(PetState oneShot)
         {
+            if (_state == PetState.Fall || _state == PetState.Climb || _state == PetState.WalkToPerch)
+                return;
             SetState(oneShot);
         }
 
         private void EndOneShot()
         {
-            SetState(PetState.Idle);
+            SetState(_elevated ? PetState.Perched : PetState.Idle);
         }
 
         private void SetState(PetState state)
@@ -451,6 +694,8 @@ namespace Rhinomon
                 case PetState.Walk:
                 case PetState.WalkToPerch:
                     return (int)PetAnim.Walk;
+                case PetState.Perched:
+                    return _perchWalking ? (int)PetAnim.Walk : (int)PetAnim.Idle;
                 case PetState.Climb:
                     return (int)PetAnim.Climb;
                 case PetState.Sleep:

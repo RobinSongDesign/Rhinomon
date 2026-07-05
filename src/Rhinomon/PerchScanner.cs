@@ -139,5 +139,79 @@ namespace Rhinomon
             anchorScreen = takeSecond ? secondScreen : bestScreen;
             return true;
         }
+
+        public bool TryFindWorldPerch(
+            RhinoDoc doc,
+            Point3d petPos,
+            double worldSize,
+            out Guid objectId,
+            out BoundingBox bbox)
+        {
+            objectId = Guid.Empty;
+            bbox = BoundingBox.Empty;
+
+            if (doc == null || worldSize <= 0)
+                return false;
+            if (doc.Objects.Count > MaxDocumentObjects)
+                return false;
+
+            Guid bestId = Guid.Empty, secondId = Guid.Empty;
+            BoundingBox bestBox = BoundingBox.Empty, secondBox = BoundingBox.Empty;
+            double bestDist = double.MaxValue, secondDist = double.MaxValue;
+            double maxDistance = worldSize * 40.0;
+            double reachableBaseZ = worldSize * 0.25;
+
+            int examined = 0;
+            foreach (RhinoObject obj in doc.Objects)
+            {
+                if (++examined > MaxExaminedObjects)
+                    break;
+                if (obj == null || !obj.Visible)
+                    continue;
+
+                GeometryBase geo = obj.Geometry;
+                if (geo == null)
+                    continue;
+
+                BoundingBox candidate = geo.GetBoundingBox(false);
+                if (!candidate.IsValid)
+                    continue;
+
+                double height = candidate.Max.Z - candidate.Min.Z;
+                if (candidate.Min.Z > reachableBaseZ || height < worldSize)
+                    continue;
+
+                double dist = HorizontalDistanceToFootprint(petPos, candidate);
+                if (dist > maxDistance)
+                    continue;
+
+                if (dist < bestDist)
+                {
+                    secondId = bestId; secondBox = bestBox; secondDist = bestDist;
+                    bestId = obj.Id; bestBox = candidate; bestDist = dist;
+                }
+                else if (dist < secondDist)
+                {
+                    secondId = obj.Id; secondBox = candidate; secondDist = dist;
+                }
+            }
+
+            if (bestId == Guid.Empty)
+                return false;
+
+            bool takeSecond = secondId != Guid.Empty && _rng.Next(3) == 0;
+            objectId = takeSecond ? secondId : bestId;
+            bbox = takeSecond ? secondBox : bestBox;
+            return true;
+        }
+
+        private static double HorizontalDistanceToFootprint(Point3d point, BoundingBox bbox)
+        {
+            double x = Math.Clamp(point.X, bbox.Min.X, bbox.Max.X);
+            double y = Math.Clamp(point.Y, bbox.Min.Y, bbox.Max.Y);
+            double dx = point.X - x;
+            double dy = point.Y - y;
+            return Math.Sqrt(dx * dx + dy * dy);
+        }
     }
 }
