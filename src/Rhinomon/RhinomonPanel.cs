@@ -21,6 +21,15 @@ namespace Rhinomon
         private readonly Button _removeButton = new Button { Text = "Remove" };
         private readonly DropDown _scaleDrop = new DropDown();
         private readonly DropDown _activityDrop = new DropDown();
+        private readonly DropDown _modeDrop = new DropDown();
+        private readonly NumericStepper _worldSizeStep = new NumericStepper
+        {
+            MinValue = 0,
+            MaxValue = 1.0e9,
+            Increment = 1,
+            DecimalPlaces = 3,
+            MaximumDecimalPlaces = 6,
+        };
         private readonly CheckBox _showCheck = new CheckBox { Text = "Show pet" };
         private readonly Button _hideButton = new Button { Text = "Hide permanently (kill switch)" };
 
@@ -33,10 +42,14 @@ namespace Rhinomon
                 _scaleDrop.Items.Add(s);
             foreach (string s in new[] { "Lively", "Normal", "Chill" })
                 _activityDrop.Items.Add(s);
+            foreach (string s in new[] { "Screen", "World" })
+                _modeDrop.Items.Add(s);
 
             _petDrop.SelectedIndexChanged += (s, e) => ApplyPetSelection();
             _scaleDrop.SelectedIndexChanged += (s, e) => ApplyScale();
             _activityDrop.SelectedIndexChanged += (s, e) => ApplyActivity();
+            _modeDrop.SelectedIndexChanged += (s, e) => ApplyMode();
+            _worldSizeStep.ValueChanged += (s, e) => ApplyWorldSize();
             _showCheck.CheckedChanged += (s, e) => ApplyShow();
             _importButton.Click += (s, e) => ImportPet();
             _removeButton.Click += (s, e) => RemovePet();
@@ -63,6 +76,8 @@ namespace Rhinomon
                     }),
                     new TableRow(new Label { Text = "Scale" }, _scaleDrop),
                     new TableRow(new Label { Text = "Activity" }, _activityDrop),
+                    new TableRow(new Label { Text = "Mode" }, _modeDrop),
+                    new TableRow(new Label { Text = "World size" }, _worldSizeStep),
                     new TableRow(_showCheck, null),
                     new TableRow(_hideButton, null),
                     new TableRow { ScaleHeight = true },
@@ -112,6 +127,9 @@ namespace Rhinomon
 
                 _scaleDrop.SelectedIndex = Math.Clamp(config.Scale - 1, 0, 2);
                 _activityDrop.SelectedIndex = Math.Clamp((int)config.Activity, 0, 2);
+                _modeDrop.SelectedIndex = Math.Clamp((int)config.Mode, 0, 1);
+                _worldSizeStep.Value = Math.Max(0.0, config.WorldSize);
+                _worldSizeStep.Enabled = config.Mode == PetDisplayMode.World;
                 _showCheck.Checked = PetSystem.Active;
                 _removeButton.Enabled = _petDrop.SelectedIndex >= BuiltInNames.Length;
             }
@@ -172,6 +190,40 @@ namespace Rhinomon
             plugin.SaveConfig();
         }
 
+        private void ApplyMode()
+        {
+            if (_updating)
+                return;
+            var plugin = RhinomonPlugin.Instance;
+            if (plugin == null || _modeDrop.SelectedIndex < 0)
+                return;
+
+            var mode = (PetDisplayMode)Math.Clamp(_modeDrop.SelectedIndex, 0, 1);
+            if (plugin.Config.Mode != mode)
+            {
+                plugin.Config.Mode = mode;
+                plugin.SaveConfig();
+                RestartIfActive(plugin.Config);
+            }
+            _worldSizeStep.Enabled = mode == PetDisplayMode.World;
+        }
+
+        private void ApplyWorldSize()
+        {
+            if (_updating)
+                return;
+            var plugin = RhinomonPlugin.Instance;
+            if (plugin == null)
+                return;
+
+            double value = Math.Max(0.0, _worldSizeStep.Value);
+            if (Math.Abs(value - plugin.Config.WorldSize) < 1e-9)
+                return;
+            plugin.Config.WorldSize = value;
+            plugin.SaveConfig();
+            RestartIfActive(plugin.Config);
+        }
+
         private void ApplyShow()
         {
             if (_updating)
@@ -193,6 +245,14 @@ namespace Rhinomon
                 PetSystem.Disable();
             }
             plugin.SaveConfig();
+        }
+
+        private static void RestartIfActive(PetSettings config)
+        {
+            if (!PetSystem.Active)
+                return;
+            PetSystem.Disable();
+            PetSystem.Enable(config);
         }
 
         private void ImportPet()

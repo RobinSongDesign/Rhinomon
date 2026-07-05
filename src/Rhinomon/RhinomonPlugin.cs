@@ -23,6 +23,12 @@ namespace Rhinomon
         Chill = 2,
     }
 
+    public enum PetDisplayMode
+    {
+        Screen = 0,
+        World = 1,
+    }
+
     /// <summary>
     /// User configuration persisted through PlugIn.Settings.
     /// </summary>
@@ -33,6 +39,8 @@ namespace Rhinomon
         public string CustomPet = "";
         public int Scale = 2;
         public ActivityLevel Activity = ActivityLevel.Lively;
+        public PetDisplayMode Mode = PetDisplayMode.Screen;
+        public double WorldSize;
         public bool Enabled;
         public bool Hidden;
 
@@ -42,6 +50,8 @@ namespace Rhinomon
             CustomPet = s.GetString("CustomPet", "");
             Scale = Math.Clamp(s.GetInteger("Scale", 2), 1, 3);
             Activity = s.GetEnumValue("Activity", ActivityLevel.Lively);
+            Mode = s.GetEnumValue("Mode", PetDisplayMode.Screen);
+            WorldSize = Math.Max(0.0, s.GetDouble("WorldSize", 0.0));
             Enabled = s.GetBool("Enabled", false);
             Hidden = s.GetBool("Hidden", false);
         }
@@ -52,6 +62,8 @@ namespace Rhinomon
             s.SetString("CustomPet", CustomPet ?? "");
             s.SetInteger("Scale", Scale);
             s.SetEnumValue("Activity", Activity);
+            s.SetEnumValue("Mode", Mode);
+            s.SetDouble("WorldSize", Math.Max(0.0, WorldSize));
             s.SetBool("Enabled", Enabled);
             s.SetBool("Hidden", Hidden);
         }

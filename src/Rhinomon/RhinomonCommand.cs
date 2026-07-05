@@ -12,6 +12,8 @@ namespace Rhinomon
     ///   Pet          - Clawd / Crab / Nova
     ///   Scale        - 1 / 2 / 3
     ///   Activity     - Lively / Normal / Chill
+    ///   Mode         - Screen / World
+    ///   WorldSize    - model-unit size for World mode; 0 means automatic
     ///   Hide         - kill switch with confirmation; running Rhinomon again restores
     /// All settings persist via PlugIn.Settings.
     /// </summary>
@@ -23,6 +25,7 @@ namespace Rhinomon
         // and on typing. Bare numbers are still accepted via AcceptNumber below.
         private static readonly string[] ScaleNames = { "x1", "x2", "x3" };
         private static readonly string[] ActivityNames = { "Lively", "Normal", "Chill" };
+        private static readonly string[] ModeNames = { "Screen", "World" };
 
         public override string EnglishName => "Rhinomon";
 
@@ -58,6 +61,11 @@ namespace Rhinomon
                 int optPet = go.AddOptionList("Pet", PetNames, (int)config.Pet);
                 int optScale = go.AddOptionList("Scale", ScaleNames, config.Scale - 1);
                 int optActivity = go.AddOptionList("Activity", ActivityNames, (int)config.Activity);
+                int optMode = go.AddOptionList("Mode", ModeNames, (int)config.Mode);
+                int optWorldSize = -1;
+                var worldSizeOption = new OptionDouble(Math.Max(0.0, config.WorldSize), 0.0, 1.0e9);
+                if (config.Mode == PetDisplayMode.World)
+                    optWorldSize = go.AddOptionDouble("WorldSize", ref worldSizeOption);
                 int optPanel = go.AddOption("Panel");
                 int optHide = go.AddOption("Hide");
 
@@ -118,6 +126,23 @@ namespace Rhinomon
                     plugin.SaveConfig();
                     optionChanged = true;
                 }
+                else if (index == optMode)
+                {
+                    var displayMode = (PetDisplayMode)Math.Clamp(
+                        option.CurrentListOptionIndex, 0, ModeNames.Length - 1);
+                    if (displayMode != config.Mode)
+                    {
+                        config.Mode = displayMode;
+                        plugin.SaveConfig();
+                        RestartIfActive(config);
+                    }
+                    optionChanged = true;
+                }
+                else if (index == optWorldSize)
+                {
+                    ApplyWorldSize(plugin, config, worldSizeOption.CurrentValue);
+                    optionChanged = true;
+                }
                 else if (index == optPanel)
                 {
                     Rhino.UI.Panels.OpenPanel(typeof(RhinomonPanel).GUID);
@@ -151,6 +176,24 @@ namespace Rhinomon
             config.Scale = scale;
             plugin.SaveConfig();
             PetSystem.ApplyVisualSettings();
+        }
+
+        private static void ApplyWorldSize(RhinomonPlugin plugin, PetSettings config, double worldSize)
+        {
+            worldSize = Math.Max(0.0, worldSize);
+            if (Math.Abs(worldSize - config.WorldSize) < 1e-9)
+                return;
+            config.WorldSize = worldSize;
+            plugin.SaveConfig();
+            RestartIfActive(config);
+        }
+
+        private static void RestartIfActive(PetSettings config)
+        {
+            if (!PetSystem.Active)
+                return;
+            PetSystem.Disable();
+            PetSystem.Enable(config);
         }
 
         private static void Toggle(RhinomonPlugin plugin, PetSettings config)
