@@ -118,7 +118,7 @@ namespace Rhinomon
                 if (bmp.Width == SheetWidth && bmp.Height == SheetHeight)
                     return new Bitmap(bmp);
 
-                if (LooksLikeScaledSheet(bmp.Width, bmp.Height))
+                if (IsAllowedScaledSheet(bmp.Width, bmp.Height))
                     return ResizeSheet(bmp);
 
                 return BuildSheetFromSingleImage(bmp);
@@ -130,13 +130,10 @@ namespace Rhinomon
             }
         }
 
-        private static bool LooksLikeScaledSheet(int width, int height)
+        private static bool IsAllowedScaledSheet(int width, int height)
         {
-            if (width < SheetWidth || height < SheetHeight)
-                return false;
-            double expected = (double)SheetWidth / SheetHeight;
-            double actual = (double)width / height;
-            return Math.Abs(actual - expected) < 0.015;
+            return (width == SheetWidth * 2 && height == SheetHeight * 2) ||
+                   (width == SheetWidth * 4 && height == SheetHeight * 4);
         }
 
         private static Bitmap ResizeSheet(Bitmap source)
@@ -144,19 +141,11 @@ namespace Rhinomon
             var result = new Bitmap(SheetWidth, SheetHeight, PixelFormat.Format32bppArgb);
             using var g = Graphics.FromImage(result);
             g.Clear(Color.Transparent);
-            g.InterpolationMode = IsIntegerScaledSheet(source.Width, source.Height)
-                ? InterpolationMode.NearestNeighbor
-                : InterpolationMode.HighQualityBicubic;
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
             g.PixelOffsetMode = PixelOffsetMode.Half;
             g.CompositingMode = CompositingMode.SourceOver;
             g.DrawImage(source, new Rectangle(0, 0, SheetWidth, SheetHeight));
             return result;
-        }
-
-        private static bool IsIntegerScaledSheet(int width, int height)
-        {
-            return width % SheetWidth == 0 && height % SheetHeight == 0 &&
-                   width / SheetWidth == height / SheetHeight;
         }
 
         private static Bitmap BuildSheetFromSingleImage(Bitmap source)

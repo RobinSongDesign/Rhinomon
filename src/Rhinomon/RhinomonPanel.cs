@@ -70,7 +70,7 @@ namespace Rhinomon
                     }),
                     new TableRow(null, new Label
                     {
-                        Text = "Import a 256x224 sheet or a single PNG image.",
+                        Text = "Import a 256x224 sheet, 2x/4x sheet, or single PNG.",
                         TextColor = Colors.Gray,
                         Font = SystemFonts.Default(8),
                     }),
