@@ -71,17 +71,18 @@ namespace Rhinomon
         private readonly List<DisplayBitmap> _ownedDisplayBitmaps = new List<DisplayBitmap>();
 
         private bool _disposed;
+        private int _spritePixels;
 
         public int Scale { get; }
         public bool UsingPlaceholder { get; private set; }
 
-        public int SpritePixels => TileSize * Scale;
+        public int SpritePixels => _spritePixels;
         public int EmotePixels => EmoteTileSize * Scale;
 
         public SpriteAtlas(PetKind pet, int scale)
         {
             Scale = Math.Clamp(scale, 1, 6);
-            SliceSheet(LoadEmbeddedBitmap(SheetNames[Math.Clamp((int)pet, 0, SheetNames.Length - 1)]));
+            SliceSheet(LoadEmbeddedBitmap(SheetNames[Math.Clamp((int)pet, 0, SheetNames.Length - 1)]), TileSize);
             LoadEmoteSheet();
         }
 
@@ -89,7 +90,8 @@ namespace Rhinomon
         public SpriteAtlas(string customSheetPath, int scale)
         {
             Scale = Math.Clamp(scale, 1, 6);
-            SliceSheet(LoadFileBitmap(customSheetPath));
+            Bitmap sheet = LoadFileBitmap(customSheetPath);
+            SliceSheet(sheet, DetectTileSize(sheet));
             LoadEmoteSheet();
         }
 
@@ -110,13 +112,17 @@ namespace Rhinomon
             return _emotes[emote];
         }
 
-        private void SliceSheet(Bitmap sheet)
+        private void SliceSheet(Bitmap sheet, int sourceTileSize)
         {
             if (sheet == null)
             {
                 UsingPlaceholder = true;
+                sourceTileSize = TileSize;
                 sheet = MakePlaceholderSheet(SheetColumns * TileSize, AnimationCount * TileSize, TileSize);
             }
+
+            sourceTileSize = Math.Clamp(sourceTileSize, TileSize, TileSize * 4);
+            _spritePixels = Math.Max(TileSize * Scale, sourceTileSize);
 
             using (sheet)
             {
@@ -127,7 +133,12 @@ namespace Rhinomon
                     _framesLeft[row] = new DisplayBitmap[frames];
                     for (int col = 0; col < frames; col++)
                     {
-                        Bitmap right = ExtractScaledTile(sheet, col * TileSize, row * TileSize, TileSize);
+                        Bitmap right = ExtractScaledTile(
+                            sheet,
+                            col * sourceTileSize,
+                            row * sourceTileSize,
+                            sourceTileSize,
+                            _spritePixels);
                         var left = (Bitmap)right.Clone();
                         left.RotateFlip(RotateFlipType.RotateNoneFlipX);
                         _framesRight[row][col] = Wrap(right);
@@ -149,7 +160,12 @@ namespace Rhinomon
             using (sheet)
             {
                 for (int col = 0; col < EmoteCount; col++)
-                    _emotes[col] = Wrap(ExtractScaledTile(sheet, col * EmoteTileSize, 0, EmoteTileSize));
+                    _emotes[col] = Wrap(ExtractScaledTile(
+                        sheet,
+                        col * EmoteTileSize,
+                        0,
+                        EmoteTileSize,
+                        EmotePixels));
             }
         }
 
@@ -166,10 +182,9 @@ namespace Rhinomon
         /// draw. Out-of-range source rectangles (undersized sheet) yield the
         /// transparent parts of a fresh bitmap, which is safe.
         /// </summary>
-        private Bitmap ExtractScaledTile(Bitmap sheet, int srcX, int srcY, int tile)
+        private Bitmap ExtractScaledTile(Bitmap sheet, int srcX, int srcY, int sourceTile, int outputTile)
         {
-            int dst = tile * Scale;
-            var result = new Bitmap(dst, dst, PixelFormat.Format32bppArgb);
+            var result = new Bitmap(outputTile, outputTile, PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(result))
             {
                 g.InterpolationMode = InterpolationMode.NearestNeighbor;
@@ -177,8 +192,8 @@ namespace Rhinomon
                 g.CompositingMode = CompositingMode.SourceCopy;
                 g.DrawImage(
                     sheet,
-                    new Rectangle(0, 0, dst, dst),
-                    new Rectangle(srcX, srcY, tile, tile),
+                    new Rectangle(0, 0, outputTile, outputTile),
+                    new Rectangle(srcX, srcY, sourceTile, sourceTile),
                     GraphicsUnit.Pixel);
             }
             return result;
@@ -205,8 +220,8 @@ namespace Rhinomon
                     return null;
                 // Copy so the file handle is not kept open for the atlas lifetime.
                 using var fromFile = new Bitmap(path);
-                if (fromFile.Width != SheetColumns * TileSize ||
-                    fromFile.Height != AnimationCount * TileSize)
+                int tile = DetectTileSize(fromFile);
+                if (tile == 0)
                     return null; // malformed sheet: placeholder is safer than misaligned frames
                 return new Bitmap(fromFile);
             }
@@ -214,6 +229,23 @@ namespace Rhinomon
             {
                 return null;
             }
+        }
+
+        private static int DetectTileSize(Bitmap sheet)
+        {
+            if (sheet == null)
+                return 0;
+
+            for (int scale = 1; scale <= 4; scale *= 2)
+            {
+                int tile = TileSize * scale;
+                if (sheet.Width == SheetColumns * tile &&
+                    sheet.Height == AnimationCount * tile)
+                {
+                    return tile;
+                }
+            }
+            return 0;
         }
 
         private static Bitmap LoadEmbeddedBitmap(string fileName)

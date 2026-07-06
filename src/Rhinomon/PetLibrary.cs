@@ -9,8 +9,8 @@ namespace Rhinomon
 {
     /// <summary>
     /// Store for user-imported pet sprite sheets (PRD F10). Imported PNGs are
-    /// normalized into the internal 256x224 sheet layout before they are stored,
-    /// so the atlas loader never sees a malformed sheet.
+    /// normalized into a supported sheet layout before they are stored, so the
+    /// atlas loader never sees a malformed sheet.
     /// </summary>
     internal static class PetLibrary
     {
@@ -115,11 +115,11 @@ namespace Rhinomon
                     return null;
                 }
 
-                if (bmp.Width == SheetWidth && bmp.Height == SheetHeight)
+                if ((bmp.Width == SheetWidth && bmp.Height == SheetHeight) ||
+                    IsAllowedScaledSheet(bmp.Width, bmp.Height))
+                {
                     return new Bitmap(bmp);
-
-                if (IsAllowedScaledSheet(bmp.Width, bmp.Height))
-                    return ResizeSheet(bmp);
+                }
 
                 return BuildSheetFromSingleImage(bmp);
             }
@@ -134,18 +134,6 @@ namespace Rhinomon
         {
             return (width == SheetWidth * 2 && height == SheetHeight * 2) ||
                    (width == SheetWidth * 4 && height == SheetHeight * 4);
-        }
-
-        private static Bitmap ResizeSheet(Bitmap source)
-        {
-            var result = new Bitmap(SheetWidth, SheetHeight, PixelFormat.Format32bppArgb);
-            using var g = Graphics.FromImage(result);
-            g.Clear(Color.Transparent);
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
-            g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.CompositingMode = CompositingMode.SourceOver;
-            g.DrawImage(source, new Rectangle(0, 0, SheetWidth, SheetHeight));
-            return result;
         }
 
         private static Bitmap BuildSheetFromSingleImage(Bitmap source)
