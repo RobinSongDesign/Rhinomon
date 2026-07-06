@@ -9,6 +9,8 @@
     <!-- Rhino plug-ins are .rhp files (renamed .dll). -->
     <TargetExt>.rhp</TargetExt>
     <Version>0.1.0</Version>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Company>Rhinomon</Company>
     <Product>Rhinomon</Product>
     <Description>A tiny pixel pet living in your Rhino viewport.</Description>

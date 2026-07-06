@@ -22,11 +22,8 @@ the distributable `.yak` package for food4Rhino / Rhino's Package Manager.
 
 A Yak package is built from a staging folder that contains, side by side:
 
-- `manifest.yml` (this directory's template — confirm all `TODO` fields
-  first, see below)
-- `rhinomon.png` — the package icon referenced by `manifest.yml` (**TODO**:
-  not yet supplied; see main README/food4Rhino listing draft for the media
-  checklist)
+- `manifest.yml` (this directory's Yak package manifest)
+- `rhinomon.png` — the package icon referenced by `manifest.yml`
 - `Rhinomon.rhp` — the Release build output
 - any non-GAC runtime dependencies the plugin needs alongside the `.rhp`
   (none expected beyond RhinoCommon, which is provided by Rhino itself per
@@ -55,9 +52,10 @@ This produces a file named per Yak's convention:
 rhinomon-<version>-rh8-win.yak
 ```
 
-e.g. `rhinomon-0.1.0-rh8-win.yak`. The `rh8-win` tag communicates the
-distribution target — Rhino 8, Windows — matching the naming called out in
-`PRD.md` §8.
+e.g. `rhinomon-0.1.0-rh8-win.yak` (newer Yak versions may include the exact
+Rhino 8 service-release tag, such as `rh8_32-win`). The Rhino/platform tag
+communicates the distribution target — Rhino 8, Windows — matching the naming
+called out in `PRD.md` §8.
 
 ## Sanity-check before publishing
 
