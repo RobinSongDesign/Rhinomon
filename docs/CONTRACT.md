@@ -44,7 +44,8 @@ d:\Dev\Rhinomon\
 ## C# 侧约定
 
 - TargetFramework：`net7.0-windows`，`UseWindowsForms=true`
-- 依赖：NuGet `RhinoCommon` 8.x（`ExcludeAssets=runtime`），Rhino 8 Windows only
+- 依赖：NuGet `RhinoCommon`，固定为最老的 Rhino 8 SDK `8.0.23304.9001`（`ExcludeAssets=runtime`），
+  这样 Yak 包的最低 Rhino 版本是 `rh8_0`、所有 Rhino 8 都能装；Rhino 8 Windows only
 - 输出改名 `.rhp`（`<TargetExt>.rhp</TargetExt>`）
 - 资产嵌入：csproj 用通配符 `..\..\assets\*.png` + `..\..\assets\atlas.json` 作
   EmbeddedResource（带 Link 名 `Assets/<file>`）；**assets 目录为空时也必须能编译**

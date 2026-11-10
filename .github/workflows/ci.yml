@@ -27,17 +27,21 @@ jobs:
       - run: python tools/ci/check_contract.py
 
   build:
-    name: Build plug-in
+    name: Build plug-in and Yak package
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      # Same command as docs/TODO-2.5D.md section 5: zero errors, zero warnings.
-      - run: dotnet build src/Rhinomon/Rhinomon.csproj -c Release -warnaserror -v minimal
+      # The same script the release workflow runs: Release build with warnings
+      # as errors, then `yak build`. Nothing is published from here.
+      - run: ./packaging/build-yak.ps1 -OutDir dist
+        shell: pwsh
       - uses: actions/upload-artifact@v4
         with:
-          name: Rhinomon-rhp
-          path: src/Rhinomon/bin/Release/net7.0-windows/Rhinomon.rhp
+          name: rhinomon-package
+          path: |
+            dist/*.yak
+            src/Rhinomon/bin/Release/net7.0-windows/Rhinomon.rhp
           if-no-files-found: error

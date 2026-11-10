@@ -1,0 +1,109 @@
+name: Release
+
+# Push a tag such as v0.2.0 (or v0.2.0-beta.1 for a prerelease) on main:
+# builds the Yak package, attaches it to a GitHub release and, when the
+# YAK_TOKEN repository secret is set, publishes it to yak.rhino3d.com so it
+# shows up as an update in Rhino's Package Manager.
+# Re-running the job is safe for the GitHub release; Yak itself refuses to
+# take the same version of the same distribution twice.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          $version = $env:TAG -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$') {
+            throw "Tag '$env:TAG' is not vX.Y.Z or vX.Y.Z-prerelease."
+          }
+          $base = ($version -split '-')[0]
+          $declared = (Select-Xml -Path src/Rhinomon/Rhinomon.csproj -XPath "//Version").Node.InnerText.Trim()
+          if ($base -ne $declared) {
+            throw "Tag says $base but Rhinomon.csproj says $declared. Bump the version in the repo first."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "base=$base" >> $env:GITHUB_OUTPUT
+          "prerelease=$(($version -match '-').ToString().ToLower())" >> $env:GITHUB_OUTPUT
+
+      - name: Contract check
+        run: python tools/ci/check_contract.py
+
+      - name: Build Yak package
+        id: package
+        run: ./packaging/build-yak.ps1 -Version '${{ steps.version.outputs.version }}' -OutDir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rhinomon-yak
+          path: dist/*.yak
+          if-no-files-found: error
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BASE: ${{ steps.version.outputs.base }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          PACKAGE: ${{ steps.package.outputs.package }}
+        run: |
+          # Release notes = this version's section of CHANGELOG.md.
+          $notes = @()
+          $inside = $false
+          foreach ($line in Get-Content CHANGELOG.md -Encoding utf8) {
+            if ($line -match '^## ') {
+              if ($inside) { break }
+              $inside = $line -match "^## \[?$([regex]::Escape($env:BASE))\]?(\s|$)"
+              continue
+            }
+            if ($inside) { $notes += $line }
+          }
+          $text = ($notes -join "`n").Trim()
+          if (-not $text) { $text = "See CHANGELOG.md." }
+          [System.IO.File]::WriteAllText("dist/notes.md", $text, [System.Text.UTF8Encoding]::new($false))
+
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG $env:PACKAGE --clobber
+          } else {
+            $flags = @("--title", "Rhinomon $env:VERSION", "--notes-file", "dist/notes.md", "--verify-tag")
+            if ($env:PRERELEASE -eq "true") { $flags += "--prerelease" }
+            gh release create $env:TAG $env:PACKAGE @flags
+          }
+          if ($LASTEXITCODE -ne 0) { throw "GitHub release failed." }
+
+      - name: Publish to Yak
+        env:
+          YAK_TOKEN: ${{ secrets.YAK_TOKEN }}
+          PACKAGE: ${{ steps.package.outputs.package }}
+        run: |
+          if (-not $env:YAK_TOKEN) {
+            Write-Host "::warning::YAK_TOKEN secret is not set, so nothing was pushed to yak.rhino3d.com. Add the secret and re-run this job, or push the .yak from the GitHub release by hand."
+            exit 0
+          }
+          & dist/yak.exe push $env:PACKAGE
+          if ($LASTEXITCODE -ne 0) { throw "yak push failed." }
+          Write-Host "Published $(Split-Path $env:PACKAGE -Leaf) to yak.rhino3d.com"

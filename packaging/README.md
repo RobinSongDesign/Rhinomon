@@ -9,6 +9,50 @@ the distributable `.yak` package for food4Rhino / Rhino's Package Manager.
 > https://developer.rhino3d.com/guides/yak/ — treat this file as the
 > standard workflow, not a guaranteed-current CLI reference.
 
+## Releasing (automated)
+
+Releases are cut by pushing a tag; `.github/workflows/release.yml` does the
+rest on a Windows runner (no Rhino needed, the yak CLI is downloaded from
+McNeel):
+
+1. Bump the version in **both** `src/Rhinomon/Rhinomon.csproj` (`<Version>`)
+   and `manifest.yml`, add a section to `CHANGELOG.md`, and merge to `main`.
+   CI fails if the two versions differ.
+2. Tag and push:
+   ```
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+   Use `v0.2.0-beta.1` for a prerelease: it is only offered to users who tick
+   "Include pre-releases" in the Package Manager, which makes it the safe way
+   to try a build in your own Rhino first.
+3. The workflow builds `rhinomon-<version>-rh8_0-win.yak`, attaches it to a
+   GitHub release, and pushes it to yak.rhino3d.com **if** the `YAK_TOKEN`
+   repository secret is set. Without the secret it stops after the GitHub
+   release and says so in the run summary.
+
+One-time setup of the secret, on any machine with the yak CLI (it ships with
+Rhino as `Yak.exe`):
+
+```
+yak login --ci
+```
+
+Sign in with the McNeel account that owns the `rhinomon` package, copy the key
+it prints, and store it as the repository secret `YAK_TOKEN` (GitHub ▸
+Settings ▸ Secrets and variables ▸ Actions, or `gh secret set YAK_TOKEN`).
+
+The same build can be run locally with `pwsh packaging/build-yak.ps1`; the
+package lands in `dist/`. Yak never lets a pushed version be replaced or
+deleted (only yanked), so anything wrong means rolling the version forward.
+
+The package is built against the oldest Rhino 8 SDK (see the `RhinoCommon`
+pin in the csproj), which is what gives it the `rh8_0` tag and lets every
+Rhino 8 install it. The script refuses to produce a package with any other
+tag.
+
+The sections below describe the same steps done by hand.
+
 ## Prerequisites
 
 - Rhino 8 installed. It ships the `Yak.exe` CLI, typically at:
