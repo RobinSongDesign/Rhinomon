@@ -76,15 +76,20 @@ Run the **`Rhinomon`** command.
 | `Activity` | `Lively` / `Normal` / `Chill` | How quickly the pet gets bored and moves through its idle timeline (default: `Lively`) |
 | `Mode` | `Screen` / `World` | `Screen` keeps the classic 2D viewport pet; `World` makes it live at a model-space position |
 | `WorldSize` | number, `0` = automatic | Pet height in model units for `World` mode; ignored in `Screen` mode |
+| `Panel` | — | Opens the dockable Rhinomon settings panel (same settings, plus custom pet import) |
 | `Hide` | — | Kill switch: permanently disables the pet (asks for confirmation). Run `Rhinomon` again anytime to bring it back |
 
-All settings persist across Rhino restarts via `PlugIn.Settings`.
+All settings persist across Rhino restarts via `PlugIn.Settings`. The plug-in
+loads on demand, so after restarting Rhino run `Rhinomon` once to bring your
+pet back; that first run only restores it, and Enter will not dismiss it.
 
 In `World` mode, Rhinomon is drawn as a 2.5D world-space sprite: it keeps an
 absolute model-unit size, scales with camera distance, can be hidden behind
 geometry, and climbs cached bounding-box faces instead of screen edges.
-Use `WorldSize=0` for automatic sizing from the visible model bounds, or set a
+Use `WorldSize=0` for automatic sizing from the visible model bounds (kept
+between the equivalent of 0.5 mm and 1 m, whatever the file's units), or set a
 specific model-unit height when you want predictable scale across files.
+A pet hidden behind geometry leaves the click to the object in front of it.
 
 <!-- SCREENSHOT: the Rhinomon command line showing the Pet / Scale / Activity
      / Hide options -->
@@ -144,6 +149,12 @@ performance.** Concretely, per the acceptance targets in `PRD.md` §7:
   automatically drops to **1–2 fps**.
 - If redraw time goes over **60 ms**, its timer stops completely — it
   becomes a static, purely event-driven sprite until things speed back up.
+- Resting costs almost nothing: an idle pet holds still and only breathes or
+  blinks every few seconds, a pet asleep for two minutes settles into a single
+  static frame, and nothing is animated at all while Rhino is not the
+  foreground application.
+- It never appears in `ViewCaptureToFile` / `ViewCaptureToClipboard` output or
+  in prints.
 - It adds **zero** to Rhino's startup time (the plugin loads on demand, only
   when the command first runs).
 - While any command is running, the pet produces **zero** additional
@@ -214,7 +225,8 @@ These are deliberate scope decisions, not bugs:
 - No telemetry or usage tracking of any kind.
 - Mood is session-only and resets whenever Rhino restarts — no persistent
   "leveling up".
-- Settings are command-line only (`Rhinomon` + options); no Eto UI panel yet.
+- Custom pets can only be imported and selected from the panel
+  (`Rhinomon` ▸ `Panel`); the command line switches between the built-in pets.
 
 ---
 

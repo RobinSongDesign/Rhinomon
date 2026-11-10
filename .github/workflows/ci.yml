@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Sprite contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Pillow enables the "committed sheets == generator output" check.
+      - run: python -m pip install --disable-pip-version-check pillow
+      - run: python tools/ci/check_contract.py
+
+  build:
+    name: Build plug-in
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      # Same command as docs/TODO-2.5D.md section 5: zero errors, zero warnings.
+      - run: dotnet build src/Rhinomon/Rhinomon.csproj -c Release -warnaserror -v minimal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rhinomon-rhp
+          path: src/Rhinomon/bin/Release/net7.0-windows/Rhinomon.rhp
+          if-no-files-found: error

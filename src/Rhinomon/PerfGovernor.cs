@@ -1,12 +1,52 @@
 using System;
+using System.Runtime.InteropServices;
 
 namespace Rhinomon
 {
+    /// <summary>
+    /// Tells whether the foreground window belongs to this process (the Rhino
+    /// main window, a floating panel, Grasshopper...). Two user32 calls, no
+    /// allocation. If the calls are unavailable the answer is always "yes", so
+    /// the pet simply keeps animating.
+    /// </summary>
+    internal static class AppFocus
+    {
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+        private static readonly uint OwnProcessId = (uint)Environment.ProcessId;
+        private static bool _unavailable;
+
+        public static bool IsRhinoForeground()
+        {
+            if (_unavailable)
+                return true;
+            try
+            {
+                IntPtr foreground = GetForegroundWindow();
+                if (foreground == IntPtr.Zero)
+                    return false; // locked screen / mid-switch
+                GetWindowThreadProcessId(foreground, out uint pid);
+                return pid == OwnProcessId;
+            }
+            catch (Exception)
+            {
+                _unavailable = true;
+                return true;
+            }
+        }
+    }
+
     /// <summary>
     /// Drives the idle animation with a WinForms timer (UI thread) at 4-6 fps and
     /// enforces the avoidance and degradation rules:
     ///  - timer paused while a command runs, while the view is being dynamically
     ///    manipulated, or while the left mouse button is dragging (PRD F2/P6);
+    ///  - no ticks at all while Rhino is not the foreground application: a pet
+    ///    nobody is working next to must not keep redrawing the scene;
     ///  - viewport redraws sampled continuously; average cost &gt; 25 ms drops the
     ///    animation to 1-2 fps, &gt; 60 ms stops the timer entirely and the pet
     ///    becomes a static sprite drawn only on user-triggered redraws (P3/P4).
@@ -15,6 +55,7 @@ namespace Rhinomon
     {
         private const int NormalIntervalCapMs = 160;      // never faster than ~6 fps
         private const int DegradedIntervalMs = 650;       // level 1: ~1.5 fps
+        private const int BackgroundIntervalMs = 1000;    // focus poll while Rhino is in the background
         private const int DynamicDisplayHoldMs = 400;     // treat view as "in drag" this long after a dynamic frame
         private const double DegradeAtMs = 25.0;          // level 0 -> 1
         private const double StopAtMs = 60.0;             // -> level 2
@@ -123,6 +164,16 @@ namespace Rhinomon
                 var engine = Engine;
                 if (engine == null)
                     return;
+
+                if (!AppFocus.IsRhinoForeground())
+                {
+                    // Background: no simulation, no redraw; just poll for the
+                    // user's return. The interval logic below restores the
+                    // normal pace on the first foreground tick.
+                    if (_timer != null && _timer.Interval != BackgroundIntervalMs)
+                        _timer.Interval = BackgroundIntervalMs;
+                    return;
+                }
 
                 if (dt < 1)
                     dt = 1;

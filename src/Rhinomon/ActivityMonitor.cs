@@ -36,9 +36,15 @@ namespace Rhinomon
         private Guid _watchedObjectId = Guid.Empty;
         private bool _anchorDeleted;
 
+        // Bumped by anything that may have changed which objects exist, where
+        // they are or whether they are visible. PerchScanner rebuilds its
+        // bounding-box snapshot only when this moves.
+        private int _docEpoch;
+
         // Consecutive-failure counters, one per callback site (see Guard).
         private int _failBegin, _failEnd, _failUndo, _failAdd, _failDelete,
-                    _failReplace, _failViewMod, _failViewActive, _failCloseDoc;
+                    _failReplace, _failViewMod, _failViewActive, _failCloseDoc,
+                    _failUndelete, _failLayer, _failAttributes;
 
         public bool CommandRunning => _commandDepth > 0;
 
@@ -48,6 +54,9 @@ namespace Rhinomon
 
         public long IdleMilliseconds =>
             CommandRunning ? 0 : System.Environment.TickCount64 - _lastActivityMs;
+
+        /// <summary>Document-content version; see _docEpoch.</summary>
+        public int DocEpoch => _docEpoch;
 
         public void Start()
         {
@@ -60,6 +69,9 @@ namespace Rhinomon
             RhinoDoc.AddRhinoObject += OnAddObject;
             RhinoDoc.DeleteRhinoObject += OnDeleteObject;
             RhinoDoc.ReplaceRhinoObject += OnReplaceObject;
+            RhinoDoc.UndeleteRhinoObject += OnUndeleteObject;
+            RhinoDoc.ModifyObjectAttributes += OnModifyAttributes;
+            RhinoDoc.LayerTableEvent += OnLayerTableEvent;
             RhinoDoc.CloseDocument += OnCloseDocument;
             RhinoView.Modified += OnViewModified;
             RhinoView.SetActive += OnViewSetActive;
@@ -76,6 +88,9 @@ namespace Rhinomon
             RhinoDoc.AddRhinoObject -= OnAddObject;
             RhinoDoc.DeleteRhinoObject -= OnDeleteObject;
             RhinoDoc.ReplaceRhinoObject -= OnReplaceObject;
+            RhinoDoc.UndeleteRhinoObject -= OnUndeleteObject;
+            RhinoDoc.ModifyObjectAttributes -= OnModifyAttributes;
+            RhinoDoc.LayerTableEvent -= OnLayerTableEvent;
             RhinoDoc.CloseDocument -= OnCloseDocument;
             RhinoView.Modified -= OnViewModified;
             RhinoView.SetActive -= OnViewSetActive;
@@ -136,6 +151,9 @@ namespace Rhinomon
             {
                 if (_commandDepth > 0)
                     _commandDepth--;
+                // Hide/Show/Lock and friends change what is visible without
+                // any add/delete event.
+                _docEpoch++;
                 TouchActivity();
                 if (_commandDepth == 0)
                 {
@@ -157,6 +175,7 @@ namespace Rhinomon
                 if (e.IsEndUndo || e.IsEndRedo)
                 {
                     _undoCount++;
+                    _docEpoch++;
                     TouchActivity();
                     // Undo driven from outside a command (API/macros): react now,
                     // since no EndCommand will fold the counters for us.
@@ -176,6 +195,7 @@ namespace Rhinomon
             try
             {
                 _addCount++;
+                _docEpoch++;
                 TouchActivity();
                 if (_commandDepth == 0)
                     Engine?.OnStrongInterrupt(); // scripted/API document edit
@@ -192,6 +212,7 @@ namespace Rhinomon
             try
             {
                 _deleteCount++;
+                _docEpoch++;
                 if (e.ObjectId == _watchedObjectId && _watchedObjectId != Guid.Empty)
                     _anchorDeleted = true;
                 TouchActivity();
@@ -211,6 +232,7 @@ namespace Rhinomon
             {
                 // A replace also raises delete+add for the same object; counting
                 // it here would double-book, so only the idle clock is touched.
+                _docEpoch++;
                 TouchActivity();
                 _failReplace = 0;
             }
@@ -220,11 +242,51 @@ namespace Rhinomon
             }
         }
 
+        private void OnUndeleteObject(object sender, RhinoObjectEventArgs e)
+        {
+            try
+            {
+                _docEpoch++;
+                _failUndelete = 0;
+            }
+            catch (Exception ex)
+            {
+                Guard.Fail(ref _failUndelete, "ActivityMonitor.OnUndeleteObject", ex);
+            }
+        }
+
+        private void OnModifyAttributes(object sender, RhinoModifyObjectAttributesEventArgs e)
+        {
+            try
+            {
+                _docEpoch++; // layer / visibility change from the Properties panel
+                _failAttributes = 0;
+            }
+            catch (Exception ex)
+            {
+                Guard.Fail(ref _failAttributes, "ActivityMonitor.OnModifyAttributes", ex);
+            }
+        }
+
+        private void OnLayerTableEvent(object sender, Rhino.DocObjects.Tables.LayerTableEventArgs e)
+        {
+            try
+            {
+                _docEpoch++; // layer visibility toggled in the Layers panel (not a command)
+                _failLayer = 0;
+            }
+            catch (Exception ex)
+            {
+                Guard.Fail(ref _failLayer, "ActivityMonitor.OnLayerTableEvent", ex);
+            }
+        }
+
         private void OnCloseDocument(object sender, DocumentEventArgs e)
         {
             try
             {
                 // Any world anchor is meaningless in the next document.
+                _docEpoch++;
                 Engine?.ResetToHome();
                 TouchActivity();
                 _failCloseDoc = 0;

@@ -47,7 +47,11 @@ namespace Rhinomon
                 return Result.Success;
             }
 
-            bool optionChanged = false;
+            // First run after a Rhino restart: loading the plug-in has just
+            // brought the pet back, so a bare Enter must not send it away again.
+            bool optionChanged = plugin.ConsumeAutoRestored();
+            if (optionChanged)
+                RhinoApp.WriteLine("Rhinomon: welcome back! Your pet has returned.");
             while (true)
             {
                 // Rebuilt each pass so the option lists show the current values.
@@ -106,9 +110,12 @@ namespace Rhinomon
                 if (index == optPet)
                 {
                     var pet = (PetKind)Math.Clamp(option.CurrentListOptionIndex, 0, PetNames.Length - 1);
-                    if (pet != config.Pet)
+                    // Picking a built-in pet also leaves any custom pet, which
+                    // would otherwise keep winning in PetSystem.BuildAtlas.
+                    if (pet != config.Pet || !string.IsNullOrEmpty(config.CustomPet))
                     {
                         config.Pet = pet;
+                        config.CustomPet = "";
                         plugin.SaveConfig();
                         PetSystem.ApplyVisualSettings();
                     }

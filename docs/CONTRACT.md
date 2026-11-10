@@ -30,6 +30,8 @@ d:\Dev\Rhinomon\
 | 5   | surprised | 2    | 6   | 单次 |
 | 6   | happy     | 4    | 6   | 单次 |
 
+- 播放节奏（省重绘，每一帧动画都是一次整场景重绘）：idle 不连续循环，停在第 0 帧，
+  每隔约 2.5–6 秒按上表帧率播放一遍；sleep 连续睡满 2 分钟后停在第 0 帧不再重绘
 - 朝向：所有帧默认**朝右**；C# 侧向左移动时水平翻转绘制
 - 表情图标：`assets/emotes.png`，16×16 px/格，1 行 5 格，顺序固定
   `[heart, exclaim, question, zzz, sparkle]`

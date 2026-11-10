@@ -61,6 +61,17 @@ namespace Rhinomon
         private const long MoodHappyWindowMs = 60_000;
         private const long MoodBoredAfterMs = 600_000;
 
+        // Redraw budget. Every animation frame costs a full redraw of the
+        // user's scene, so the resting states are mostly still: idle holds
+        // frame 0 and plays one breath/blink cycle every few seconds, and a
+        // long sleep settles into a single static frame (zero redraws).
+        private const int IdleCycleGapMinMs = 2500;
+        private const int IdleCycleGapJitterMs = 3500;
+        private const long DeepSleepAfterMs = 120_000;
+        // One-shots normally end by frame advance; this deadline ends them
+        // from the draw path when the timer is paused (command / heavy scene).
+        private const int OneShotGraceMs = 500;
+
         public ActivityMonitor Monitor;
         public PerchScanner Scanner;
 
@@ -94,6 +105,10 @@ namespace Rhinomon
         private PetMood _mood = PetMood.Calm;
         private long _lastInteractionMs;
         private long _lastPettedMs;
+
+        private long _oneShotDeadlineMs;
+        private long _nextIdleCycleMs;
+        private long _sleepStartedMs;
 
         public PetMood Mood => _mood;
 
@@ -342,7 +357,7 @@ namespace Rhinomon
                 changed = true;
             }
 
-            if (AdvanceFrame(dtMs))
+            if (AdvanceFrame(dtMs, now))
                 changed = true;
 
             return changed;
@@ -368,6 +383,8 @@ namespace Rhinomon
             var atlas = PetSystem.Atlas;
             if (atlas == null || vp == null)
                 return false;
+
+            ExpireStale(Environment.TickCount64);
 
             if (_needsHomePlacement)
             {
@@ -543,7 +560,26 @@ namespace Rhinomon
             // Reactions do not interrupt airborne movement; the emote still shows.
             if (_state == PetState.Fall || _state == PetState.Climb)
                 return;
+            if (_state == oneShot)
+                return; // already playing; keep its deadline
             SetState(oneShot);
+            int row = CurrentAnimRow();
+            _oneShotDeadlineMs = Environment.TickCount64 + OneShotGraceMs +
+                                 1000L * SpriteAtlas.FrameCounts[row] / SpriteAtlas.FrameRates[row];
+        }
+
+        /// <summary>
+        /// Time-based cleanup that must not depend on the governor timer, which
+        /// is stopped during commands and on heavy scenes: without it a reaction
+        /// emote (or one-shot pose) raised just before the timer paused would
+        /// stay on screen for as long as the pause lasts. Called from the draw
+        /// path; two comparisons, no allocation.
+        /// </summary>
+        private void ExpireStale(long now)
+        {
+            UpdateEmoteExpiry(now);
+            if (IsOneShot(_state) && now >= _oneShotDeadlineMs)
+                EndOneShot();
         }
 
         private void EndOneShot()
@@ -560,8 +596,17 @@ namespace Rhinomon
             _state = state;
             _frame = 0;
             _frameAccumMs = 0;
+            long now = Environment.TickCount64;
             if (state == PetState.Sleep)
+            {
+                _sleepStartedMs = now;
                 SetEmote(EmoteKind.Zzz, long.MaxValue);
+            }
+            else if (state == PetState.Idle || state == PetState.Perched)
+            {
+                // Settle for a moment before the first breath/blink.
+                _nextIdleCycleMs = now + 600 + _rng.Next(2000);
+            }
         }
 
         private void SetEmote(EmoteKind emote, long untilMs)
@@ -621,7 +666,7 @@ namespace Rhinomon
             return state == PetState.Petted || state == PetState.Surprised || state == PetState.Happy;
         }
 
-        private bool AdvanceFrame(double dtMs)
+        private bool AdvanceFrame(double dtMs, long now)
         {
             int row = CurrentAnimRow();
             int frames = SpriteAtlas.FrameCounts[row];
@@ -630,6 +675,24 @@ namespace Rhinomon
                 fps *= 0.5; // bored pets blink in slow motion (PRD F7)
             if (frames <= 1 && !IsOneShot(_state))
                 return false;
+
+            // Deep sleep: one static frame, no further redraws until woken.
+            if (_state == PetState.Sleep && now - _sleepStartedMs >= DeepSleepAfterMs)
+            {
+                _frameAccumMs = 0;
+                if (_frame == 0)
+                    return false;
+                _frame = 0;
+                return true;
+            }
+
+            // Resting between idle cycles: hold frame 0.
+            bool resting = row == (int)PetAnim.Idle && !IsOneShot(_state);
+            if (resting && _frame == 0 && now < _nextIdleCycleMs)
+            {
+                _frameAccumMs = 0;
+                return false;
+            }
 
             bool changed = false;
             double frameMs = 1000.0 / fps;
@@ -647,6 +710,13 @@ namespace Rhinomon
                         break;
                     }
                     _frame = 0;
+                    if (resting)
+                    {
+                        // Cycle done: rest on frame 0 until the next one.
+                        _nextIdleCycleMs = now + IdleCycleGapMinMs + _rng.Next(IdleCycleGapJitterMs);
+                        _frameAccumMs = 0;
+                        break;
+                    }
                 }
             }
             return changed;

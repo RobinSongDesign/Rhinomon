@@ -32,6 +32,17 @@ namespace Rhinomon
         private const long OffscreenReturnMs = 60_000;
         private const long OverlapScanIntervalMs = 750;
 
+        // Auto-size bounds as physical lengths, converted to model units at
+        // spawn so the same model gets the same pet in mm, m or inch files.
+        private const double MinAutoSizeMm = 0.5;
+        private const double MaxAutoSizeMm = 1000.0;
+
+        // Redraw budget and timer-independent one-shot deadline; see PetEngine.
+        private const int IdleCycleGapMinMs = 2500;
+        private const int IdleCycleGapJitterMs = 3500;
+        private const long DeepSleepAfterMs = 120_000;
+        private const int OneShotGraceMs = 500;
+
         public ActivityMonitor Monitor;
         public PerchScanner Scanner;
 
@@ -72,6 +83,10 @@ namespace Rhinomon
         private PetMood _mood = PetMood.Calm;
         private long _lastInteractionMs;
         private long _lastPettedMs;
+
+        private long _oneShotDeadlineMs;
+        private long _nextIdleCycleMs;
+        private long _sleepStartedMs;
 
         public PetMood Mood => _mood;
 
@@ -327,7 +342,7 @@ namespace Rhinomon
                     break;
             }
 
-            if (AdvanceFrame(dtMs))
+            if (AdvanceFrame(dtMs, now))
                 changed = true;
 
             return changed;
@@ -351,6 +366,8 @@ namespace Rhinomon
 
             if (_needsSpawn)
                 Spawn(RhinoDoc.ActiveDoc, vp);
+
+            ExpireStale(System.Environment.TickCount64);
 
             if (!TryProjectPet(vp, out petRect))
                 return false;
@@ -380,6 +397,8 @@ namespace Rhinomon
             var atlas = PetSystem.Atlas;
             if (atlas == null || _needsSpawn || _worldSize <= 0)
                 return false;
+
+            ExpireStale(System.Environment.TickCount64);
 
             sprite = atlas.GetFrame(CurrentAnimRow(), _frame, _facingLeft);
             position = _pos + Vector3d.ZAxis * (_worldSize * 0.5);
@@ -416,9 +435,14 @@ namespace Rhinomon
 
         private double ResolveWorldSize(RhinoDoc doc, RhinoViewport vp)
         {
+            // An explicit size is the user's call: honor it as typed.
             var settings = PetSystem.CurrentSettings;
             if (settings != null && settings.WorldSize > 0)
-                return Math.Clamp(settings.WorldSize, 0.5, 1000.0);
+                return Math.Clamp(settings.WorldSize, 1.0e-9, 1.0e9);
+
+            double mm = MillimetersInModelUnits(doc);
+            double minSize = MinAutoSizeMm * mm;
+            double maxSize = MaxAutoSizeMm * mm;
 
             BoundingBox bbox = BoundingBox.Empty;
             int examined = 0;
@@ -442,8 +466,20 @@ namespace Rhinomon
             if (autoSize <= 0 && vp != null)
                 autoSize = vp.CameraLocation.DistanceTo(vp.CameraTarget) * 0.05;
             if (autoSize <= 0)
-                autoSize = 1.0;
-            return Math.Clamp(autoSize, 0.5, 1000.0);
+                autoSize = minSize;
+            return Math.Clamp(autoSize, minSize, maxSize);
+        }
+
+        /// <summary>Length of one millimeter in the document's model units.</summary>
+        private static double MillimetersInModelUnits(RhinoDoc doc)
+        {
+            if (doc == null)
+                return 1.0;
+            double scale = RhinoMath.UnitScale(UnitSystem.Millimeters, doc.ModelUnitSystem);
+            // Unitless / custom-unit files have no usable conversion.
+            if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0)
+                return 1.0;
+            return scale;
         }
 
         private void UpdateCameraRight(RhinoViewport vp)
@@ -684,6 +720,16 @@ namespace Rhinomon
             if (vp == null || _worldSize <= 0)
                 return false;
 
+            // A point behind a perspective camera still projects to finite,
+            // mirrored screen coordinates, which would leave a phantom click
+            // rectangle and emote on screen.
+            if (vp.IsPerspectiveProjection)
+            {
+                Vector3d toPet = _pos + Vector3d.ZAxis * (_worldSize * 0.5) - vp.CameraLocation;
+                if (toPet * vp.CameraDirection <= 0)
+                    return false;
+            }
+
             Point2d feet = vp.WorldToClient(_pos);
             Point2d head = vp.WorldToClient(_pos + Vector3d.ZAxis * _worldSize);
             if (!IsReasonable(feet) || !IsReasonable(head))
@@ -720,7 +766,24 @@ namespace Rhinomon
         {
             if (_escapingOverlap || _state == PetState.Fall || _state == PetState.Climb || _state == PetState.WalkToPerch)
                 return;
+            if (_state == oneShot)
+                return; // already playing; keep its deadline
             SetState(oneShot);
+            int row = CurrentAnimRow();
+            _oneShotDeadlineMs = System.Environment.TickCount64 + OneShotGraceMs +
+                                 1000L * SpriteAtlas.FrameCounts[row] / SpriteAtlas.FrameRates[row];
+        }
+
+        /// <summary>
+        /// Timer-independent cleanup run from the draw path (see PetEngine):
+        /// keeps a reaction emote or one-shot pose from sticking while the
+        /// governor timer is paused.
+        /// </summary>
+        private void ExpireStale(long now)
+        {
+            UpdateEmoteExpiry(now);
+            if (IsOneShot(_state) && now >= _oneShotDeadlineMs)
+                EndOneShot();
         }
 
         private void EndOneShot()
@@ -737,8 +800,16 @@ namespace Rhinomon
             _state = state;
             _frame = 0;
             _frameAccumMs = 0;
+            long now = System.Environment.TickCount64;
             if (state == PetState.Sleep)
+            {
+                _sleepStartedMs = now;
                 SetEmote(EmoteKind.Zzz, long.MaxValue);
+            }
+            else if (state == PetState.Idle || state == PetState.Perched)
+            {
+                _nextIdleCycleMs = now + 600 + _rng.Next(2000);
+            }
         }
 
         private void SetEmote(EmoteKind emote, long untilMs)
@@ -800,7 +871,7 @@ namespace Rhinomon
             return state == PetState.Petted || state == PetState.Surprised || state == PetState.Happy;
         }
 
-        private bool AdvanceFrame(double dtMs)
+        private bool AdvanceFrame(double dtMs, long now)
         {
             int row = CurrentAnimRow();
             int frames = SpriteAtlas.FrameCounts[row];
@@ -809,6 +880,24 @@ namespace Rhinomon
                 fps *= 0.5;
             if (frames <= 1 && !IsOneShot(_state))
                 return false;
+
+            // Deep sleep: one static frame, no further redraws until woken.
+            if (_state == PetState.Sleep && now - _sleepStartedMs >= DeepSleepAfterMs)
+            {
+                _frameAccumMs = 0;
+                if (_frame == 0)
+                    return false;
+                _frame = 0;
+                return true;
+            }
+
+            // Resting between idle cycles: hold frame 0.
+            bool resting = row == (int)PetAnim.Idle && !IsOneShot(_state);
+            if (resting && _frame == 0 && now < _nextIdleCycleMs)
+            {
+                _frameAccumMs = 0;
+                return false;
+            }
 
             bool changed = false;
             double frameMs = 1000.0 / fps;
@@ -826,6 +915,12 @@ namespace Rhinomon
                         break;
                     }
                     _frame = 0;
+                    if (resting)
+                    {
+                        _nextIdleCycleMs = now + IdleCycleGapMinMs + _rng.Next(IdleCycleGapJitterMs);
+                        _frameAccumMs = 0;
+                        break;
+                    }
                 }
             }
             return changed;
