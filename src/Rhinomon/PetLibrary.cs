@@ -184,18 +184,33 @@ namespace Rhinomon
             if (!hasAlpha)
                 return new Rectangle(0, 0, source.Width, source.Height);
 
-            int minX = source.Width, minY = source.Height, maxX = -1, maxY = -1;
-            for (int y = 0; y < source.Height; y++)
+            // LockBits + one row buffer: GetPixel per pixel takes seconds on a
+            // 16-megapixel import and freezes the UI thread meanwhile.
+            int width = source.Width, height = source.Height;
+            int minX = width, minY = height, maxX = -1, maxY = -1;
+            BitmapData data = source.LockBits(
+                new Rectangle(0, 0, width, height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try
             {
-                for (int x = 0; x < source.Width; x++)
+                var row = new int[width];
+                for (int y = 0; y < height; y++)
                 {
-                    if (source.GetPixel(x, y).A <= 8)
-                        continue;
-                    if (x < minX) minX = x;
-                    if (y < minY) minY = y;
-                    if (x > maxX) maxX = x;
-                    if (y > maxY) maxY = y;
+                    System.Runtime.InteropServices.Marshal.Copy(
+                        IntPtr.Add(data.Scan0, y * data.Stride), row, 0, width);
+                    for (int x = 0; x < width; x++)
+                    {
+                        if (((uint)row[x] >> 24) <= 8) // alpha is the top byte of ARGB
+                            continue;
+                        if (x < minX) minX = x;
+                        if (y < minY) minY = y;
+                        if (x > maxX) maxX = x;
+                        if (y > maxY) maxY = y;
+                    }
                 }
+            }
+            finally
+            {
+                source.UnlockBits(data);
             }
 
             if (maxX < minX || maxY < minY)

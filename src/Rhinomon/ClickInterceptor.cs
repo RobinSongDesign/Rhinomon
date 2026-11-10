@@ -1,4 +1,8 @@
 using System;
+using Rhino.Display;
+using Rhino.DocObjects;
+using Rhino.Geometry;
+using Rhino.Input.Custom;
 using Rhino.UI;
 
 namespace Rhinomon
@@ -21,6 +25,7 @@ namespace Rhinomon
         private int _failDown;
         private int _failUp;
         private int _failMove;
+        private int _failOcclusion;
 
         protected override void OnMouseDown(MouseCallbackEventArgs e)
         {
@@ -44,6 +49,10 @@ namespace Rhinomon
                     return;
                 if (!conduit.LastPetRect.Contains(e.ViewportPoint))
                     return;
+                // World mode: a pet hidden behind geometry must not steal the
+                // click meant for the object in front of it.
+                if (IsPetOccluded(view, e.ViewportPoint))
+                    return;
 
                 // Hit: eat the click so Rhino never starts a selection, and pet the pet.
                 e.Cancel = true;
@@ -54,6 +63,82 @@ namespace Rhinomon
             catch (Exception ex)
             {
                 Guard.Fail(ref _failDown, "ClickInterceptor.OnMouseDown", ex);
+            }
+        }
+
+        /// <summary>
+        /// World mode only: true when a pickable object lies in front of the pet
+        /// under the cursor. Runs Rhino's own point pick once, and only for a
+        /// click that already landed inside the pet rectangle, so it costs what
+        /// the click would have cost anyway. Any doubt (no pick point, pick
+        /// failure) keeps the previous behavior: the pet takes the click.
+        /// </summary>
+        private bool IsPetOccluded(RhinoView view, System.Drawing.Point clientPoint)
+        {
+            if (_failOcclusion >= Guard.MaxConsecutiveFailures)
+                return false;
+
+            var engine = Engine;
+            if (engine == null ||
+                !engine.TryGetWorldDrawInfo(out _, out Point3d petCenter, out float worldSize))
+                return false; // Screen mode: the pet is a HUD sprite on top of everything
+
+            try
+            {
+                var doc = view.Document;
+                var vp = view.ActiveViewport;
+                if (doc == null || vp == null)
+                    return false;
+                if (!vp.GetFrustumLine(clientPoint.X, clientPoint.Y, out Line pickLine))
+                    return false;
+
+                Vector3d viewDir = vp.CameraDirection;
+                if (!viewDir.Unitize())
+                    return false;
+                Point3d camera = vp.CameraLocation;
+                double petDepth = (petCenter - camera) * viewDir;
+
+                bool occluded = false;
+                using (var pick = new PickContext())
+                {
+                    pick.View = view;
+                    pick.PickStyle = PickStyle.PointPick;
+                    // Match what the user sees: surfaces only hide the sprite
+                    // (and only catch clicks) in shaded display modes.
+                    var mode = vp.DisplayMode;
+                    pick.PickMode = mode != null && mode.SupportsShading
+                        ? PickMode.Shaded
+                        : PickMode.Wireframe;
+                    pick.SetPickTransform(vp.GetPickTransform(clientPoint));
+                    pick.PickLine = pickLine;
+                    pick.UpdateClippingPlanes();
+
+                    ObjRef[] hits = doc.Objects.PickObjects(pick);
+                    if (hits != null)
+                    {
+                        for (int i = 0; i < hits.Length; i++)
+                        {
+                            ObjRef hit = hits[i];
+                            if (hit == null)
+                                continue;
+                            Point3d p = hit.SelectionPoint();
+                            // Half a body of slack: the object the pet stands on
+                            // or climbs along is not "in front" of it.
+                            if (p.IsValid && (p - camera) * viewDir < petDepth - worldSize * 0.5)
+                                occluded = true;
+                            hit.Dispose();
+                        }
+                    }
+                }
+                _failOcclusion = 0;
+                return occluded;
+            }
+            catch (Exception)
+            {
+                // Not worth disabling the pet over: after repeated failures the
+                // test is simply skipped for the rest of the session.
+                _failOcclusion++;
+                return false;
             }
         }
 

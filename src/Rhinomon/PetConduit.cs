@@ -30,11 +30,20 @@ namespace Rhinomon
         private int _failWorld;
         private int _failDraw;
 
+        /// <summary>
+        /// True while the pipeline renders for ViewCaptureToFile/Clipboard or for
+        /// printing. The pet must never end up in the user's output images.
+        /// </summary>
+        private static bool IsOutputPass(DisplayPipeline display)
+        {
+            return display != null && (display.IsInViewCapture || display.IsPrinting);
+        }
+
         protected override void CalculateBoundingBox(CalculateBoundingBoxEventArgs e)
         {
             try
             {
-                if (PetSystem.IsActiveViewport(e.Viewport))
+                if (PetSystem.IsActiveViewport(e.Viewport) && !IsOutputPass(e.Display))
                 {
                     _frameStartTimestamp = Stopwatch.GetTimestamp();
 
@@ -70,7 +79,7 @@ namespace Rhinomon
 
                 var display = e.Display;
                 var engine = Engine;
-                if (display == null || engine == null)
+                if (display == null || engine == null || IsOutputPass(display))
                     return;
 
                 if (engine.TryGetWorldDrawInfo(out DisplayBitmap sprite, out var position, out float worldSize) &&
@@ -98,6 +107,13 @@ namespace Rhinomon
                 var engine = Engine;
                 if (display == null || engine == null)
                     return;
+                if (IsOutputPass(display))
+                {
+                    // Not a frame the user is looking at: draw nothing, and keep
+                    // its (often much higher) cost out of the governor samples.
+                    _frameStartTimestamp = 0;
+                    return;
+                }
 
                 bool dynamic = display.IsDynamicDisplay;
 
@@ -110,6 +126,12 @@ namespace Rhinomon
                         display.DrawBitmap(emote, emoteRect.X, emoteRect.Y);
                     LastPetRect = petRect;
                     LastPetViewportId = vp.Id;
+                }
+                else
+                {
+                    // Nothing on screen this frame (off-screen or behind the
+                    // camera): a stale rectangle must not keep eating clicks.
+                    LastPetRect = Rectangle.Empty;
                 }
 
                 PetSystem.NotifyDpiScale(display.DpiScale);

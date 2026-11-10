@@ -10,7 +10,8 @@ namespace Rhinomon
     /// <summary>
     /// Finds something for the pet to climb on (PRD F6): walks the visible
     /// document objects, reads their cached bounding boxes (accurate=false, never
-    /// forces a recompute), projects the corners to the screen and picks a
+    /// forces a recompute) into a snapshot that is rebuilt only when the
+    /// document changes, projects the corners to the screen and picks a
     /// suitable candidate. The anchor is the world-space center of the bbox top
     /// face; the engine re-projects that single point every frame to follow the
     /// view. Runs at most once per idle episode and never on huge documents.
@@ -22,6 +23,70 @@ namespace Rhinomon
         private const int TopMarginPx = 24; // room for the pet + emote above the anchor
 
         private readonly Random _rng = new Random();
+
+        public ActivityMonitor Monitor;
+
+        // Snapshot of the visible objects' cached bounding boxes. Enumerating
+        // the object table allocates a wrapper per object, so it happens once
+        // per document change (ActivityMonitor.DocEpoch), not once per scan;
+        // the scans themselves then walk plain struct arrays, allocation-free.
+        private BoundingBox[] _boxes = new BoundingBox[64];
+        private Guid[] _ids = new Guid[64];
+        private int _count;
+        private bool _snapshotValid;
+        private bool _snapshotTooMany;
+        private uint _snapshotDocSerial;
+        private int _snapshotEpoch;
+
+        /// <summary>
+        /// Brings the snapshot up to date. Returns false when the document is
+        /// too large for climbing behavior (PRD F6).
+        /// </summary>
+        private bool EnsureSnapshot(RhinoDoc doc)
+        {
+            var monitor = Monitor;
+            uint serial = doc.RuntimeSerialNumber;
+            int epoch = monitor != null ? monitor.DocEpoch : 0;
+            // Without a monitor there is no change signal: always rebuild.
+            if (_snapshotValid && monitor != null && serial == _snapshotDocSerial && epoch == _snapshotEpoch)
+                return !_snapshotTooMany;
+
+            _snapshotValid = true;
+            _snapshotDocSerial = serial;
+            _snapshotEpoch = epoch;
+            _count = 0;
+            _snapshotTooMany = doc.Objects.Count > MaxDocumentObjects;
+            if (_snapshotTooMany)
+                return false;
+
+            int examined = 0;
+            foreach (RhinoObject obj in doc.Objects)
+            {
+                if (++examined > MaxExaminedObjects)
+                    break;
+                if (obj == null || !obj.Visible)
+                    continue;
+
+                GeometryBase geo = obj.Geometry;
+                if (geo == null)
+                    continue;
+
+                BoundingBox bbox = geo.GetBoundingBox(false); // cached, cheap
+                if (!bbox.IsValid)
+                    continue;
+
+                if (_count == _boxes.Length)
+                {
+                    int capacity = Math.Min(_boxes.Length * 2, MaxExaminedObjects);
+                    Array.Resize(ref _boxes, capacity);
+                    Array.Resize(ref _ids, capacity);
+                }
+                _boxes[_count] = bbox;
+                _ids[_count] = obj.Id;
+                _count++;
+            }
+            return true;
+        }
 
         public bool TryFindPerch(
             RhinoDoc doc,
@@ -39,7 +104,7 @@ namespace Rhinomon
 
             if (doc == null || viewport == null)
                 return false;
-            if (doc.Objects.Count > MaxDocumentObjects)
+            if (!EnsureSnapshot(doc))
                 return false;
 
             Rectangle bounds = viewport.Bounds;
@@ -55,21 +120,9 @@ namespace Rhinomon
             Point2d bestScreen = new Point2d(0, 0), secondScreen = new Point2d(0, 0);
             double bestDist = double.MaxValue, secondDist = double.MaxValue;
 
-            int examined = 0;
-            foreach (RhinoObject obj in doc.Objects)
+            for (int n = 0; n < _count; n++)
             {
-                if (++examined > MaxExaminedObjects)
-                    break;
-                if (obj == null || !obj.Visible)
-                    continue;
-
-                GeometryBase geo = obj.Geometry;
-                if (geo == null)
-                    continue;
-
-                BoundingBox bbox = geo.GetBoundingBox(false); // cached, cheap
-                if (!bbox.IsValid)
-                    continue;
+                BoundingBox bbox = _boxes[n];
 
                 // Project all 8 corners; track the screen-space extents.
                 double minX = double.MaxValue, maxX = double.MinValue;
@@ -122,11 +175,11 @@ namespace Rhinomon
                 if (dist < bestDist)
                 {
                     secondId = bestId; secondAnchor = bestAnchor; secondScreen = bestScreen; secondDist = bestDist;
-                    bestId = obj.Id; bestAnchor = candidate; bestScreen = screen; bestDist = dist;
+                    bestId = _ids[n]; bestAnchor = candidate; bestScreen = screen; bestDist = dist;
                 }
                 else if (dist < secondDist)
                 {
-                    secondId = obj.Id; secondAnchor = candidate; secondScreen = screen; secondDist = dist;
+                    secondId = _ids[n]; secondAnchor = candidate; secondScreen = screen; secondDist = dist;
                 }
             }
 
@@ -152,7 +205,7 @@ namespace Rhinomon
 
             if (doc == null || worldSize <= 0)
                 return false;
-            if (doc.Objects.Count > MaxDocumentObjects)
+            if (!EnsureSnapshot(doc))
                 return false;
 
             Guid bestId = Guid.Empty, secondId = Guid.Empty;
@@ -161,21 +214,9 @@ namespace Rhinomon
             double maxDistance = worldSize * 40.0;
             double reachableBaseZ = worldSize * 0.25;
 
-            int examined = 0;
-            foreach (RhinoObject obj in doc.Objects)
+            for (int n = 0; n < _count; n++)
             {
-                if (++examined > MaxExaminedObjects)
-                    break;
-                if (obj == null || !obj.Visible)
-                    continue;
-
-                GeometryBase geo = obj.Geometry;
-                if (geo == null)
-                    continue;
-
-                BoundingBox candidate = geo.GetBoundingBox(false);
-                if (!candidate.IsValid)
-                    continue;
+                BoundingBox candidate = _boxes[n];
 
                 double height = candidate.Max.Z - candidate.Min.Z;
                 if (candidate.Min.Z > reachableBaseZ || height < worldSize)
@@ -188,11 +229,11 @@ namespace Rhinomon
                 if (dist < bestDist)
                 {
                     secondId = bestId; secondBox = bestBox; secondDist = bestDist;
-                    bestId = obj.Id; bestBox = candidate; bestDist = dist;
+                    bestId = _ids[n]; bestBox = candidate; bestDist = dist;
                 }
                 else if (dist < secondDist)
                 {
-                    secondId = obj.Id; secondBox = candidate; secondDist = dist;
+                    secondId = _ids[n]; secondBox = candidate; secondDist = dist;
                 }
             }
 
@@ -217,28 +258,16 @@ namespace Rhinomon
 
             if (doc == null || worldSize <= 0)
                 return false;
-            if (doc.Objects.Count > MaxDocumentObjects)
+            if (!EnsureSnapshot(doc))
                 return false;
 
             double bestExitDistance = double.MaxValue;
             Point3d bestTarget = Point3d.Origin;
             BoundingBox bestBox = BoundingBox.Empty;
 
-            int examined = 0;
-            foreach (RhinoObject obj in doc.Objects)
+            for (int n = 0; n < _count; n++)
             {
-                if (++examined > MaxExaminedObjects)
-                    break;
-                if (obj == null || !obj.Visible)
-                    continue;
-
-                GeometryBase geo = obj.Geometry;
-                if (geo == null)
-                    continue;
-
-                BoundingBox candidate = geo.GetBoundingBox(false);
-                if (!candidate.IsValid)
-                    continue;
+                BoundingBox candidate = _boxes[n];
                 if (!TryComputeOverlapEscape(petPos, worldSize, candidate, out Point3d target, out double exitDistance))
                     continue;
 

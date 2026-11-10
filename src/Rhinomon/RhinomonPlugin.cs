@@ -136,6 +136,7 @@ namespace Rhinomon
             Governor = new PerfGovernor();
 
             var scanner = new PerchScanner();
+            scanner.Monitor = Monitor;
             if (settings.Mode == PetDisplayMode.World)
             {
                 var worldEngine = new WorldPetEngine();
@@ -322,8 +323,29 @@ namespace Rhinomon
             Config.Load(Settings);
             Rhino.UI.Panels.RegisterPanel(this, typeof(RhinomonPanel), "Rhinomon", CreatePanelIcon());
             if (Config.Enabled && !Config.Hidden)
+            {
                 PetSystem.Enable(Config);
+                _autoRestoredAtMs = Environment.TickCount64;
+            }
             return LoadReturnCode.Success;
+        }
+
+        // The plug-in loads on demand, usually because the user just typed
+        // "Rhinomon" to get the pet back after a restart.
+        private const long AutoRestoreWindowMs = 3000;
+        private long _autoRestoredAtMs = -1;
+
+        /// <summary>
+        /// True once, when the command runs right after OnLoad re-enabled the pet.
+        /// The time window excludes loads caused by something else (e.g. Rhino
+        /// restoring the docked panel at startup) long before the command.
+        /// </summary>
+        internal bool ConsumeAutoRestored()
+        {
+            long at = _autoRestoredAtMs;
+            _autoRestoredAtMs = -1;
+            return at >= 0 && PetSystem.Active &&
+                   Environment.TickCount64 - at <= AutoRestoreWindowMs;
         }
 
         /// <summary>
